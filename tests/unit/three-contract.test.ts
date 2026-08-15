@@ -15,7 +15,7 @@ import {
   workgroupBarrier,
 } from 'three/tsl';
 
-describe('Three.js r185 public API contract', () => {
+describe('Three.js r184-r185 public API contract', () => {
   it('exports every Three.js primitive consumed directly by the renderer', () => {
     expect(WebGPURenderer).toBeTypeOf('function');
     expect(DataTexture).toBeTypeOf('function');

@@ -2,17 +2,19 @@
 
 # three-sog-splats
 
-面向 Three.js r185 的原生 bundled SOG v2 高斯泼溅加载与渲染库。它保留
-SOG WebP 属性图和 codebook，不会先把完整高斯属性展开成 CPU 数组。
+面向 Three.js r184-r185 的原生 bundled SOG v2 高斯泼溅加载与渲染库。它
+保留 SOG WebP 属性图和 codebook，不会先把完整高斯属性展开成 CPU 数组。
 
 ## 兼容约定
 
-- 已验证基线为 `three@0.185.0`，peer 范围是 `^0.185.0`。
+- 最低支持 `three@0.184.0`；r184 与 r185 均通过真实浏览器 WebGPU 和强制
+  WebGL 测试。peer 范围是 `>=0.184.0 <0.186.0`。
+- 开发依赖仍精确固定为 `three@0.185.0`，避免上游变化被静默带入。
 - 使用 `three/webgpu` 导出的 `WebGPURenderer`。WebGPU 是主路径；该渲染器
   的强制 WebGL backend 是回退路径。
 - 经典 `WebGLRenderer` 不在 MVP 范围内，会返回带错误码的明确错误。
-- TypeScript 消费者还需安装 `@types/three@0.185.0`，因为 Three.js 运行时
-  包本身不附带这套声明。
+- TypeScript 消费者还需安装与运行时版本匹配的 `@types/three`，因为 Three.js
+  运行时包本身不附带这套声明。
 
 Three.js 由应用提供且不会被打包。`fflate` 是 ZIP 解析依赖。PlayCanvas
 Engine 与本地 `potree-engine` 只用于设计参考，不是运行时依赖，也不会进入
@@ -105,4 +107,7 @@ npm run benchmark
 npm run test:acceptance
 ```
 
-测试夹具是 CC0 合成数据；两种 backend 的 no-SH/SH 浏览器结果使用容差截图。
+合成测试夹具采用 CC0；两种 backend 的 no-SH/SH 浏览器结果使用容差截图。
+浏览器套件还会在两种 backend 中加载一个从 Three.js CC BY 4.0 Millipede
+示例转换得到的 10,000-Gaussian SOG。参见[夹具署名](./tests/fixtures/millipede-10k.license.txt)
+与[兼容性审计](./docs/three-compatibility.md)。

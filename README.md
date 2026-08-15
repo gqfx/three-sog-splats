@@ -2,18 +2,23 @@ English | [简体中文](./README.zh-CN.md)
 
 # three-sog-splats
 
-Native bundled SOG v2 Gaussian-splat loading and rendering for Three.js r185.
+Native bundled SOG v2 Gaussian-splat loading and rendering for Three.js
+r184-r185.
 The package preserves SOG WebP attributes and codebooks instead of expanding a
 complete CPU-side Gaussian representation.
 
 ## Compatibility
 
-- `three@0.185.0` is the tested baseline; the peer range is `^0.185.0`.
+- The minimum supported release is `three@0.184.0`; r184 and r185 both pass the
+  real-browser WebGPU and forced-WebGL suite. The peer range is
+  `>=0.184.0 <0.186.0`.
+- Development remains pinned to `three@0.185.0` so upstream changes are
+  intentional and reproducible.
 - Use `WebGPURenderer` from `three/webgpu`. The primary backend is WebGPU; the
   renderer's forced WebGL backend is the supported fallback.
 - The classic `WebGLRenderer` API is deliberately rejected with a typed error.
-- TypeScript consumers also need `@types/three@0.185.0`, because the Three.js
-  runtime package does not ship those declarations.
+- TypeScript consumers also need a matching `@types/three` release, because the
+  Three.js runtime package does not ship those declarations.
 
 Three.js is external and supplied by the application. `fflate` is the archive
 dependency. PlayCanvas Engine and the local `potree-engine` checkout are design
@@ -121,5 +126,8 @@ npm run benchmark
 npm run test:acceptance
 ```
 
-Fixtures are synthetic CC0 assets. Browser image baselines use tolerant
-comparisons for both backends and no-SH/SH variants.
+Synthetic fixtures are CC0 assets. Browser image baselines use tolerant
+comparisons for both backends and no-SH/SH variants. The browser suite also
+loads a 10,000-Gaussian SOG derived from Three.js's CC BY 4.0 Millipede example
+through both backends. See [fixture attribution](./tests/fixtures/millipede-10k.license.txt)
+and the [compatibility audit](./docs/three-compatibility.md).

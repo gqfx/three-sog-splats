@@ -4,7 +4,7 @@
 
 This document records the technical direction for `three-sog-splats`. The
 phase-one bundled-SOG MVP described below is implemented and acceptance-tested
-against Three.js r185; later streamed/LOD sections remain roadmap material.
+against Three.js r184-r185; later streamed/LOD sections remain roadmap material.
 
 The first milestone is intentionally limited to loading and rendering one
 bundled SOG v2 asset. Chunked and LOD-streamed SOG support is a future direction,
@@ -276,9 +276,10 @@ requiring a new renderer contract.
   `three/tsl`.
 - It must not patch Three.js renderer internals or depend on private helper
   functions from the addon `GaussianSplatMesh` implementation.
-- The first compatibility baseline is Three.js r185. Support for earlier or
-  later releases is expanded only after adapter tests confirm the required TSL,
-  storage-buffer, compute, and backend behavior.
+- The supported compatibility window is Three.js r184-r185. r184 is the first
+  release with every lifecycle, TSL, storage-buffer, compute, readback, and
+  diagnostics API required by the MVP; both endpoints pass direct browser
+  compatibility tests.
 - Backend-specific code uses Three.js classes directly in focused render and
   sort modules, while archive parsing and SOG metadata remain renderer-free.
 - The mesh must participate in the normal Three.js render loop. Applications
@@ -334,7 +335,7 @@ required to complete the single-SOG milestone.
 
 - configure TypeScript, ESM exports, linting, tests, and build output;
 - declare Three.js as a peer dependency;
-- establish an r185 compatibility test application;
+- establish an r184-r185 compatibility test application;
 - add small licensed SOG v2 fixtures and expected metadata;
 - define load, abort, error, and dispose contracts.
 
