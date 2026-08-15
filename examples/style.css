@@ -1,0 +1,37 @@
+:root {
+  color: #e8eefc;
+  background: #0c1220;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  overflow: hidden;
+}
+
+#viewport,
+canvas {
+  width: 100vw;
+  height: 100vh;
+  display: block;
+}
+
+aside {
+  position: fixed;
+  inset: 18px auto auto 18px;
+  width: min(360px, calc(100vw - 36px));
+  padding: 16px;
+  border: 1px solid #34405a;
+  border-radius: 12px;
+  background: rgb(12 18 32 / 88%);
+  backdrop-filter: blur(12px);
+}
+
+h1 { margin: 0 0 10px; font-size: 18px; }
+p { margin: 8px 0; }
+pre { margin: 10px 0; font-size: 11px; white-space: pre-wrap; }
+.actions { display: flex; gap: 8px; }
+button { padding: 7px 10px; cursor: pointer; }
+.hint { color: #aab6cc; font-size: 12px; }

@@ -25,7 +25,10 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:browser": "playwright test",
+    "benchmark": "npm run build && node scripts/benchmark.mjs",
+    "example": "vite --config examples/vite.config.ts"
   },
   "keywords": [
     "three.js",
