@@ -1,0 +1,20 @@
+Title: Millipede (10K SOG test derivative)
+Original title: millipede spec.
+Author: Fabian Plum (https://superspl.at/user?id=scant3d)
+Original source: https://superspl.at/scene/3d5482d4
+Three.js source: https://github.com/mrdoob/three.js/blob/07abea59aa700eed861f23ede39eaf3d892c93a4/examples/models/splat/millipede.splat
+License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+License URL: https://creativecommons.org/licenses/by/4.0/
+
+Changes made for this repository:
+- Merge-decimated from 116,374 to 10,000 Gaussians.
+- Transcoded from SPLAT to bundled SOG v2.
+- Spherical harmonics restricted to band 0 (the source has no higher bands).
+
+Conversion tool:
+- @playcanvas/splat-transform 3.0.0
+- Source commit: daf63383f32effe5cd63faa67ff030d39bfa543e
+
+Reproduction commands:
+splat-transform millipede.splat --decimate 10000 millipede-10k.ply
+splat-transform millipede-10k.ply millipede-10k.sog --filter-harmonics 0 --max-workers 0

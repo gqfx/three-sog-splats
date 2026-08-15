@@ -39,7 +39,12 @@ declare global {
 
 const parameters = new URLSearchParams(location.search);
 const forceWebGL = parameters.get('backend') === 'webgl';
-const fixture = parameters.get('fixture') === 'sh' ? 'minimal-sh1.sog' : 'minimal-no-sh.sog';
+const fixture = parameters.get('fixture') === 'real'
+  ? 'millipede-10k.sog'
+  : parameters.get('fixture') === 'sh'
+    ? 'minimal-sh1.sog'
+    : 'minimal-no-sh.sog';
+const isRealFixture = fixture === 'millipede-10k.sog';
 const status = document.querySelector<HTMLElement>('#status')!;
 const diagnosticOutput = document.querySelector<HTMLElement>('#diagnostics')!;
 const viewport = document.querySelector<HTMLElement>('#viewport')!;
@@ -122,7 +127,7 @@ state.verifyGpuSort = async () => {
 const scene = new Scene();
 scene.background = new Color(0x0c1220);
 const camera = new PerspectiveCamera(55, innerWidth / innerHeight, 0.01, 100);
-camera.position.set(0.35, 0.25, 4);
+camera.position.set(...(isRealFixture ? [0, 0.4, 1] as const : [0.35, 0.25, 4] as const));
 camera.lookAt(0, 0, 0);
 
 const renderer = new WebGPURenderer({ antialias: true, forceWebGL });
@@ -140,6 +145,7 @@ const occluder = new Mesh(
   new MeshBasicMaterial({ color: 0xf2b84b }),
 );
 occluder.position.set(0.06, 0, 0.8);
+occluder.visible = !isRealFixture;
 scene.add(occluder);
 
 let resource: Awaited<ReturnType<SOGLoader['loadAsync']>> | null = null;
@@ -197,7 +203,11 @@ try {
   state.state = 'preparing';
   updatePanel();
   splats = new SOGGaussianSplatMesh(resource);
-  splats.scale.setScalar(0.35);
+  if (isRealFixture) {
+    splats.rotation.set(Math.PI * 1.1, -Math.PI * 0.1, Math.PI * 0.15);
+  } else {
+    splats.scale.setScalar(0.35);
+  }
   await splats.prepare(renderer);
   scene.add(splats);
   state.backend = splats.diagnostics.backend;

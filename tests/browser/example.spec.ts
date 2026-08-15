@@ -102,6 +102,46 @@ for (const fixture of ['no-sh', 'sh'] as const) {
   });
 }
 
+for (const backend of ['webgpu', 'webgl'] as const) {
+  test(`renders the real Three.js millipede fixture with ${backend}`, async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    page.on('console', (message) => {
+      if (/GPUValidationError|validation error|GL_INVALID_OPERATION|buffer is not big enough/i.test(message.text())) {
+        errors.push(message.text());
+      }
+    });
+    await page.goto(`/?fixture=real${backend === 'webgl' ? '&backend=webgl' : ''}`);
+    await page.waitForFunction(() => ['ready', 'failed'].includes(window.__SOG_EXAMPLE__?.state));
+    const snapshot = await page.evaluate(() => window.__SOG_EXAMPLE__);
+    if (backend === 'webgpu' && (snapshot.state !== 'ready' || snapshot.backend !== 'webgpu')) {
+      test.skip(true, 'WebGPU is unavailable in this browser environment.');
+    }
+    expect(snapshot.state, snapshot.error ?? undefined).toBe('ready');
+    expect(snapshot.backend).toBe(backend);
+    expect(snapshot.fixture).toBe('millipede-10k.sog');
+    expect(snapshot.diagnostics?.activeSplatCount).toBe(10_000);
+    expect(snapshot.diagnostics?.readbackCount).toBe(backend === 'webgl' ? 1 : 0);
+    expect(snapshot.diagnostics?.deferredUploadCount).toBe(0);
+    expect(snapshot.diagnostics?.deferredCompileCount).toBe(0);
+    expect(errors).toEqual([]);
+    await waitForStableSort(page);
+    await page.locator('aside').evaluate((element) => { element.style.visibility = 'hidden'; });
+    await expect(page.locator('canvas')).toHaveScreenshot(`${backend}-millipede-10k.png`, {
+      maxDiffPixelRatio: 0.025,
+      threshold: 0.25,
+    });
+
+    const before = await page.evaluate(() => window.__SOG_EXAMPLE__.diagnostics?.sortCount ?? 0);
+    await page.evaluate(() => window.__SOG_EXAMPLE__.moveCamera());
+    await expect.poll(() => page.evaluate(
+      () => window.__SOG_EXAMPLE__.diagnostics?.sortCount ?? 0,
+    )).toBeGreaterThan(before);
+    expect(await page.evaluate(() => window.__SOG_EXAMPLE__.diagnostics?.readbackCount))
+      .toBe(backend === 'webgl' ? 1 : 0);
+  });
+}
+
 test('decodes known WebP values without browser image transformations', async ({ page }) => {
   await page.goto('/');
   await page.waitForFunction(() => window.__SOG_EXAMPLE__?.state === 'ready');
