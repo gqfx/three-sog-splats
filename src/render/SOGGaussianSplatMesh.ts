@@ -1,9 +1,15 @@
 import {
+  DataTexture,
+  FloatType,
   InstancedBufferGeometry,
   Matrix4,
   Mesh,
+  NearestFilter,
   NodeMaterial,
+  NoColorSpace,
   PerspectiveCamera,
+  RGBAFormat,
+  Texture,
   Vector3,
 } from 'three/webgpu';
 import type { Camera, WebGPURenderer } from 'three/webgpu';
@@ -13,8 +19,10 @@ import type {
   SOGActiveRange,
   SOGAttributeName,
   SOGMeshState,
+  SOGNativeImage,
   SOGPrepareOptions,
   SOGRenderDiagnostics,
+  SOGBackendKind,
 } from '../core/types.js';
 import type { SOGResource } from '../resource/SOGResource.js';
 import { getCachedCenters } from './centers.js';
@@ -26,16 +34,56 @@ import type { SOGMaterialTextures } from './material.js';
 import { SOGRenderStore } from './SOGRenderStore.js';
 import { PortableGpuRadixSorter } from './sort/PortableGpuRadixSorter.js';
 import { WebGLSortBackend } from './sort/WebGLSortBackend.js';
-import {
-  assertWebGPURenderer,
-  compileScene,
-  createCodebookTexture,
-  createNativeTexture,
-  initializeRenderer,
-  preuploadTextures,
-} from './three-r185/adapter.js';
 
 const now = (): number => globalThis.performance?.now() ?? Date.now();
+
+interface ThreeRendererBackendFlags {
+  readonly isWebGPUBackend?: boolean;
+  readonly isWebGLBackend?: boolean;
+}
+
+function assertThreeWebGPURenderer(renderer: WebGPURenderer): void {
+  if ((renderer as unknown as { isWebGPURenderer?: boolean })?.isWebGPURenderer !== true) {
+    throw new SOGError(
+      'UNSUPPORTED_RENDERER',
+      'SOGGaussianSplatMesh requires Three.js WebGPURenderer; classic WebGLRenderer is not supported.',
+    );
+  }
+}
+
+function createSOGAttributeTexture(image: SOGNativeImage, name: string): Texture {
+  const texture = new Texture(image.source);
+  texture.name = name;
+  texture.minFilter = NearestFilter;
+  texture.magFilter = NearestFilter;
+  texture.generateMipmaps = false;
+  texture.colorSpace = NoColorSpace;
+  texture.flipY = false;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function createSOGCodebookTexture(
+  scales: readonly number[],
+  sh0: readonly number[],
+  shN?: readonly number[],
+): DataTexture {
+  const data = new Float32Array(256 * 4);
+  for (let index = 0; index < 256; index += 1) {
+    data[index * 4] = scales[index] ?? 0;
+    data[index * 4 + 1] = sh0[index] ?? 0;
+    data[index * 4 + 2] = shN?.[index] ?? 0;
+  }
+  const texture = new DataTexture(data, 256, 1, RGBAFormat, FloatType);
+  texture.name = 'sog-codebooks';
+  texture.minFilter = NearestFilter;
+  texture.magFilter = NearestFilter;
+  texture.generateMipmaps = false;
+  texture.colorSpace = NoColorSpace;
+  texture.flipY = false;
+  texture.needsUpdate = true;
+  return texture;
+}
 
 function combinedSignal(internal: AbortSignal, external?: AbortSignal): AbortSignal {
   if (!external) return internal;
@@ -102,8 +150,8 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
     return this.#store ? [this.#store.activeRange] : [];
   }
 
-  async prepare(renderer: unknown, options: SOGPrepareOptions = {}): Promise<void> {
-    assertWebGPURenderer(renderer);
+  async prepare(renderer: WebGPURenderer, options: SOGPrepareOptions = {}): Promise<void> {
+    assertThreeWebGPURenderer(renderer);
     if (this.#state === 'disposed') throw new SOGError('PREPARATION_FAILED', 'Cannot prepare a disposed SOG mesh.');
     if (this.#renderer && this.#renderer !== renderer) {
       throw new SOGError('RENDERER_MISMATCH', 'A prepared SOG mesh cannot be rebound to another renderer; create another mesh over the same resource.');
@@ -148,25 +196,35 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
     try {
       this.#source.assertReady();
       throwIfAborted(signal);
-      const backend = await initializeRenderer(renderer);
+      await renderer.init();
       throwIfAborted(signal);
+      const backendFlags = renderer.backend as ThreeRendererBackendFlags;
+      let backend: SOGBackendKind;
+      if (backendFlags.isWebGPUBackend === true) backend = 'webgpu';
+      else if (backendFlags.isWebGLBackend === true) backend = 'webgl';
+      else throw new SOGError('UNSUPPORTED_RENDERER', 'The initialized Three.js renderer backend is not supported.');
       this.#diagnostics.backend = backend;
 
-      const textureMap = new Map<SOGAttributeName, ReturnType<typeof createNativeTexture>>();
+      const textureMap = new Map<SOGAttributeName, Texture>();
       cleanup.defer(() => {
         for (const texture of textureMap.values()) texture.dispose();
       });
       for (const [attribute, image] of this.#source.nativeImages) {
-        textureMap.set(attribute, createNativeTexture(image, `sog-${attribute}`));
+        textureMap.set(attribute, createSOGAttributeTexture(image, `sog-${attribute}`));
       }
-      const codebook = createCodebookTexture(
+      const codebook = createSOGCodebookTexture(
         this.#source.meta.scales.codebook,
         this.#source.meta.sh0.codebook,
         this.#source.meta.shN?.codebook,
       );
       cleanup.defer(() => codebook.dispose());
       const uploadStartedAt = now();
-      await preuploadTextures(renderer, [...textureMap.values(), codebook], signal);
+      for (const texture of [...textureMap.values(), codebook]) {
+        throwIfAborted(signal);
+        renderer.initTexture(texture);
+      }
+      await Promise.resolve();
+      throwIfAborted(signal);
       this.#diagnostics.uploadDurationMs = now() - uploadStartedAt;
 
       const meansLow = textureMap.get('means_l');
@@ -270,7 +328,9 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
       this.#store = store;
       const compileMesh = new Mesh(geometry, material);
       compileMesh.frustumCulled = false;
-      await compileScene(renderer, compileMesh, new PerspectiveCamera(), signal);
+      throwIfAborted(signal);
+      await renderer.compileAsync(compileMesh, new PerspectiveCamera());
+      throwIfAborted(signal);
       this.#diagnostics.compileDurationMs = now() - compileStartedAt;
       throwIfAborted(signal);
 

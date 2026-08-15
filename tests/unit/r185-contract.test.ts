@@ -16,7 +16,7 @@ import {
 } from 'three/tsl';
 
 describe('Three.js r185 public API contract', () => {
-  it('exports every primitive required by the compatibility adapter', () => {
+  it('exports every Three.js primitive consumed directly by the renderer', () => {
     expect(WebGPURenderer).toBeTypeOf('function');
     expect(DataTexture).toBeTypeOf('function');
     expect(StorageBufferAttribute).toBeTypeOf('function');
@@ -28,11 +28,12 @@ describe('Three.js r185 public API contract', () => {
     expect(instanceIndex).toBeDefined();
   });
 
-  it('does not import unpublished Three.js renderer internals', async () => {
+  it('uses direct public Three.js imports without an adapter layer', async () => {
     const root = resolve(import.meta.dirname, '../../src');
     const files = (await readdir(root, { recursive: true })).filter((file) => file.endsWith('.ts'));
     for (const file of files) {
       const source = await readFile(resolve(root, file), 'utf8');
+      expect(file).not.toMatch(/adapter/i);
       expect(source, file).not.toMatch(/three\/src\//);
       expect(source, file).not.toMatch(/three\/build\//);
     }

@@ -21,7 +21,6 @@ export type {
   SOGRenderDiagnostics,
   SOGResourceState,
   SOGStageTiming,
-  SupportedSOGRenderer,
 } from './core/types.js';
 export { BrowserSOGImageDecoder } from './format/image.js';
 export { decodeCenter } from './format/meta.js';

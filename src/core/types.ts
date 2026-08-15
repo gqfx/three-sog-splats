@@ -1,5 +1,4 @@
 import type { Matrix4, Texture } from 'three';
-import type { WebGPURenderer } from 'three/webgpu';
 
 export type SOGAttributeName =
   | 'means_l'
@@ -133,8 +132,6 @@ export interface PreparedSOGTextures {
   readonly attributes: ReadonlyMap<SOGAttributeName, Texture>;
   readonly codebook: Texture;
 }
-
-export type SupportedSOGRenderer = WebGPURenderer;
 
 export const SOG_MVP_MAX_SPLATS = 2_000_000;
 export const SOG_MVP_ESTIMATED_BYTES_PER_SPLAT = 52;

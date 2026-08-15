@@ -59,7 +59,7 @@ describe('SOGGaussianSplatMesh lifecycle', () => {
   it('rejects classic WebGLRenderer and renderer rebinding', async () => {
     const source = await resource();
     const mesh = new SOGGaussianSplatMesh(source);
-    await expect(mesh.prepare({ isWebGLRenderer: true })).rejects.toMatchObject({
+    await expect(mesh.prepare({ isWebGLRenderer: true } as unknown as WebGPURenderer)).rejects.toMatchObject({
       code: 'UNSUPPORTED_RENDERER',
     });
     await mesh.prepare(fakeRenderer());

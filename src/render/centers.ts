@@ -19,7 +19,6 @@ import {
   vec4,
 } from 'three/tsl';
 import type { SOGMetaV2 } from '../core/types.js';
-import { readRenderTarget } from './three-r185/adapter.js';
 
 export interface CenterDecodeTextures {
   readonly meansLow: Texture;
@@ -77,7 +76,13 @@ async function decodeCenters(
     await renderer.compileAsync(quad, quad.camera);
     renderer.setRenderTarget(target);
     quad.render(renderer);
-    const pixels = await readRenderTarget(renderer, target, textures.width, textures.height);
+    const pixels = await renderer.readRenderTargetPixelsAsync(
+      target,
+      0,
+      0,
+      textures.width,
+      textures.height,
+    );
     const rgba = pixels instanceof Float32Array
       ? pixels
       : new Float32Array(pixels.buffer, pixels.byteOffset, Math.floor(pixels.byteLength / 4));

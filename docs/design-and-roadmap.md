@@ -98,7 +98,7 @@ format itself.
   ownership, active-range contracts, cancellation, and diagnostics.
 - Three.js integration remains independent: upstream concepts are re-expressed
   with public `three`, `three/webgpu`, and `three/tsl` APIs and verified by
-  adapter tests.
+  direct compatibility tests.
 - In phase one, interval culling and compaction may be an identity operation
   over the single full-resource range. The boundary remains explicit so the
   streamed implementation can add real active-range compaction later.
@@ -127,9 +127,10 @@ The loader must not expand all splats into conventional CPU-side position,
 covariance, color, and spherical-harmonic arrays merely to construct a
 `BufferGeometry`.
 
-The WebP images and SOG codebooks remain the source representation. A renderer
-adapter may decode or copy active data into a canonical GPU work buffer, but
-that work happens on the GPU and only when the resource or active set changes.
+The WebP images and SOG codebooks remain the source representation. The
+Three.js render path may decode or copy active data into a canonical GPU work
+buffer, but that work happens on the GPU and only when the resource or active
+set changes.
 
 This is the key distinction from a loader that converts SOG into the input
 layout expected by Three.js's built-in `GaussianSplatMesh`.
@@ -278,8 +279,8 @@ requiring a new renderer contract.
 - The first compatibility baseline is Three.js r185. Support for earlier or
   later releases is expanded only after adapter tests confirm the required TSL,
   storage-buffer, compute, and backend behavior.
-- Backend-specific code belongs behind small adapters so Three.js API changes do
-  not affect archive parsing or SOG metadata handling.
+- Backend-specific code uses Three.js classes directly in focused render and
+  sort modules, while archive parsing and SOG metadata remain renderer-free.
 - The mesh must participate in the normal Three.js render loop. Applications
   should not need a second canvas or an unrelated renderer.
 

@@ -1,7 +1,5 @@
-import { Matrix4 } from 'three/webgpu';
-import type { InstancedBufferAttribute } from 'three/webgpu';
+import { InstancedBufferAttribute, IntType, Matrix4 } from 'three/webgpu';
 import { abortError, throwIfAborted } from '../../core/errors.js';
-import { createUintInstanced } from '../three-r185/adapter.js';
 import { createDepthKeys } from './depth.js';
 import { radixSortIndices } from './radix.js';
 
@@ -34,7 +32,12 @@ export class WebGLSortBackend {
     this.#centers = centers;
     this.#metrics = metrics;
     const count = centers.length / 3;
-    this.orderAttribute = createUintInstanced(Uint32Array.from({ length: count }, (_, index) => index));
+    this.orderAttribute = new InstancedBufferAttribute(
+      Uint32Array.from({ length: count }, (_, index) => index),
+      1,
+      false,
+    );
+    this.orderAttribute.gpuType = IntType;
     const usesWorker = typeof Worker !== 'undefined';
     this.gpuAllocatedBytes = this.orderAttribute.array.byteLength;
     this.cpuAllocatedBytes = centers.byteLength

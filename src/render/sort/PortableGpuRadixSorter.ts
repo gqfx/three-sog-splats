@@ -1,7 +1,6 @@
-import { Matrix4 } from 'three/webgpu';
+import { Matrix4, StorageBufferAttribute } from 'three/webgpu';
 import type {
   ComputeNode,
-  StorageBufferAttribute,
   Texture,
   Vector3,
   WebGPURenderer,
@@ -22,7 +21,6 @@ import {
   vec3,
   vec4,
 } from 'three/tsl';
-import { createUintStorage } from '../three-r185/adapter.js';
 
 export interface GpuRadixTextures {
   readonly meansLow: Texture;
@@ -49,11 +47,14 @@ export class PortableGpuRadixSorter {
   constructor(count: number, textures: GpuRadixTextures, mins: Vector3, maxs: Vector3) {
     this.count = count;
     this.capacity = nextSortCapacity(count);
-    this.#keyAttribute = createUintStorage(new Uint32Array(this.capacity));
-    this.orderAttribute = createUintStorage(Uint32Array.from({ length: this.capacity }, (_, index) => index));
-    this.#scratchKeyAttribute = createUintStorage(new Uint32Array(this.capacity));
-    this.#scratchOrderAttribute = createUintStorage(new Uint32Array(this.capacity));
-    this.#histogramAttribute = createUintStorage(new Uint32Array(256));
+    this.#keyAttribute = new StorageBufferAttribute(new Uint32Array(this.capacity), 1);
+    this.orderAttribute = new StorageBufferAttribute(
+      Uint32Array.from({ length: this.capacity }, (_, index) => index),
+      1,
+    );
+    this.#scratchKeyAttribute = new StorageBufferAttribute(new Uint32Array(this.capacity), 1);
+    this.#scratchOrderAttribute = new StorageBufferAttribute(new Uint32Array(this.capacity), 1);
+    this.#histogramAttribute = new StorageBufferAttribute(new Uint32Array(256), 1);
     this.allocatedBytes = (this.capacity * 4 * 4) + (256 * 4);
     this.#computeNodes = count === 0 ? [] : this.#buildNodes(textures, mins, maxs);
   }
