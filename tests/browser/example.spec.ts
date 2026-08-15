@@ -53,7 +53,7 @@ for (const fixture of ['no-sh', 'sh'] as const) {
       threshold: 0.25,
     });
 
-    const before = snapshot.diagnostics?.sortCount ?? 0;
+    const before = await waitForStableSort(page);
     await page.waitForTimeout(100);
     expect(await page.evaluate(() => window.__SOG_EXAMPLE__.diagnostics?.sortCount)).toBe(before);
     await page.evaluate(() => window.__SOG_EXAMPLE__.moveCamera());
