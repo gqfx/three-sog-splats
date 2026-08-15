@@ -127,7 +127,8 @@ state.verifyGpuSort = async () => {
 const scene = new Scene();
 scene.background = new Color(0x0c1220);
 const camera = new PerspectiveCamera(55, innerWidth / innerHeight, 0.01, 100);
-camera.position.set(...(isRealFixture ? [0, 0.4, 1] as const : [0.35, 0.25, 4] as const));
+if (isRealFixture) camera.position.set(0, 0.4, 1);
+else camera.position.set(0.35, 0.25, 4);
 camera.lookAt(0, 0, 0);
 
 const renderer = new WebGPURenderer({ antialias: true, forceWebGL });
