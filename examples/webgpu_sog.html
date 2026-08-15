@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>three.js webgpu - SOG loader</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0" />
+    <meta name="description" content="Native SOG v2 Gaussian splat loading with Three.js WebGPU and WebGL backends." />
+    <link rel="stylesheet" href="/three-example.css" />
+  </head>
+  <body>
+    <div id="info">
+      <div class="title-wrapper">
+        <a href="https://threejs.org/" target="_blank" rel="noopener">three.js</a>
+        <span>SOG Loader</span>
+      </div>
+      <small id="status">Initializing renderer…</small>
+      <small id="license"></small>
+    </div>
+
+    <section id="controls" aria-label="Example controls">
+      <label>
+        SOG source
+        <select id="source">
+          <option value="millipede">Millipede · full 116K</option>
+          <option value="no-sh">Synthetic · no SH</option>
+          <option value="sh">Synthetic · SH1</option>
+        </select>
+      </label>
+      <label>
+        Three.js backend
+        <select id="backend">
+          <option value="webgpu">WebGPU</option>
+          <option value="webgl">WebGL fallback</option>
+        </select>
+      </label>
+    </section>
+
+    <pre id="diagnostics" aria-live="polite"></pre>
+    <script type="module" src="/webgpu-sog.ts"></script>
+  </body>
+</html>

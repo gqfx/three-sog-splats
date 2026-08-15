@@ -115,11 +115,20 @@ methodology, [acceptance results](./docs/acceptance.md) for the release gate, an
 [design and roadmap](./docs/design-and-roadmap.md) for architecture and future
 streaming boundaries.
 
+## Example
+
+Run `npm run example`, then open
+`http://127.0.0.1:4173/webgpu_sog.html`. The public example follows the Three.js
+Gaussian Splatting example structure and loads the full Millipede SOG by
+default. Its controls switch the SOG source and reload the page with either the
+WebGPU or forced WebGL backend. See [example notes](./examples/README.md).
+
 ## Development
 
 ```bash
 npm install
 npm test
+npm run build:example
 npm run test:browser
 npm run test:package
 npm run benchmark

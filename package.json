@@ -22,6 +22,7 @@
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "npm run clean && tsc -p tsconfig.build.json",
+    "build:example": "vite build --config examples/vite.config.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
@@ -29,7 +30,7 @@
     "test:browser": "playwright test",
     "test:package": "node scripts/test-package.mjs",
     "benchmark": "npm run build && node scripts/benchmark.mjs",
-    "test:acceptance": "npm run typecheck && npm run lint && npm run test && npm run build && npm run test:browser && npm run test:package",
+    "test:acceptance": "npm run typecheck && npm run lint && npm run test && npm run build && npm run build:example && npm run test:browser && npm run test:package",
     "example": "vite --config examples/vite.config.ts"
   },
   "keywords": [

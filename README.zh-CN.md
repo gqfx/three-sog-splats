@@ -96,11 +96,19 @@ MVP 支持单个全资源 active range、SOG v2 stored/deflated ZIP、no-SH 和�
 更多信息请参阅[性能与限制](./docs/performance-limits.md)、
 [验收结果](./docs/acceptance.md)以及[设计和路线图](./docs/design-and-roadmap.md)。
 
+## 示例
+
+运行 `npm run example` 后打开
+`http://127.0.0.1:4173/webgpu_sog.html`。公开示例沿用 Three.js Gaussian
+Splatting example 的页面结构，默认加载完整 Millipede SOG，并可切换 SOG 来源、
+WebGPU backend 或强制 WebGL backend。参见[示例说明](./examples/README.md)。
+
 ## 开发验证
 
 ```bash
 npm install
 npm test
+npm run build:example
 npm run test:browser
 npm run test:package
 npm run benchmark

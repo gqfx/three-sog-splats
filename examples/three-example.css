@@ -1,0 +1,129 @@
+:root {
+  color: #fff;
+  background: #07080f;
+  font: 14px/1.4 Arial, Helvetica, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  overflow: hidden;
+}
+
+canvas {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+}
+
+a {
+  color: #8ab4f8;
+  text-decoration: none;
+}
+
+a:hover { text-decoration: underline; }
+
+#info {
+  position: fixed;
+  z-index: 2;
+  top: 14px;
+  left: 18px;
+  max-width: min(620px, calc(100vw - 36px));
+  pointer-events: none;
+  text-shadow: 0 1px 3px #000;
+}
+
+#info a { pointer-events: auto; }
+
+.title-wrapper {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  margin-bottom: 4px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.title-wrapper a {
+  color: #fff;
+  font-weight: 700;
+}
+
+#info small {
+  display: block;
+  margin-top: 3px;
+  color: #c7cbd5;
+}
+
+#controls {
+  position: fixed;
+  z-index: 3;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  gap: 10px;
+  width: min(250px, calc(100vw - 28px));
+  padding: 13px;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 4px;
+  background: rgb(18 19 24 / 90%);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 28%);
+}
+
+#controls label {
+  display: grid;
+  gap: 5px;
+  color: #b8bdc8;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+#controls select {
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid #464a55;
+  border-radius: 3px;
+  color: #fff;
+  background: #292c34;
+}
+
+#diagnostics {
+  position: fixed;
+  z-index: 2;
+  right: 14px;
+  bottom: 14px;
+  max-width: min(390px, calc(100vw - 28px));
+  max-height: 34vh;
+  margin: 0;
+  padding: 9px 11px;
+  overflow: auto;
+  border-radius: 3px;
+  color: #aeb5c2;
+  background: rgb(7 8 15 / 72%);
+  font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  pointer-events: none;
+}
+
+@media (max-width: 640px) {
+  #info {
+    top: 10px;
+    left: 12px;
+    max-width: calc(100vw - 24px);
+  }
+
+  #info #license { max-width: calc(100vw - 24px); }
+
+  #controls {
+    top: auto;
+    right: 10px;
+    bottom: 10px;
+    left: 10px;
+    grid-template-columns: 1fr 1fr;
+    width: auto;
+  }
+
+  #diagnostics { display: none; }
+}

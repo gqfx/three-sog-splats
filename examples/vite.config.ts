@@ -6,6 +6,15 @@ const threeCompatibilityRoot = process.env.THREE_COMPAT_ROOT;
 export default defineConfig({
   root: resolve(import.meta.dirname),
   publicDir: resolve(import.meta.dirname, '../tests/fixtures/generated'),
+  build: {
+    chunkSizeWarningLimit: 1_000,
+    rollupOptions: {
+      input: {
+        harness: resolve(import.meta.dirname, 'index.html'),
+        example: resolve(import.meta.dirname, 'webgpu_sog.html'),
+      },
+    },
+  },
   ...(threeCompatibilityRoot ? {
     resolve: {
       alias: [

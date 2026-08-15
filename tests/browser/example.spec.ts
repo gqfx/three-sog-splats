@@ -142,6 +142,40 @@ for (const backend of ['webgpu', 'webgl'] as const) {
   });
 }
 
+for (const backend of ['webgpu', 'webgl'] as const) {
+  test(`Three.js-style example loads and replaces SOG assets with ${backend}`, async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    page.on('console', (message) => {
+      if (/GPUValidationError|validation error|GL_INVALID_OPERATION|buffer is not big enough/i.test(message.text())) {
+        errors.push(message.text());
+      }
+    });
+    await page.goto(`/webgpu_sog.html?source=millipede${backend === 'webgl' ? '&backend=webgl' : ''}`);
+    await page.waitForFunction(() => ['ready', 'failed'].includes(window.__THREE_SOG_EXAMPLE__?.state));
+    const initial = await page.evaluate(() => window.__THREE_SOG_EXAMPLE__);
+    if (backend === 'webgpu' && (initial.state !== 'ready' || initial.backend !== 'webgpu')) {
+      test.skip(true, 'WebGPU is unavailable in this browser environment.');
+    }
+    expect(initial.state, initial.error ?? undefined).toBe('ready');
+    expect(initial.backend).toBe(backend);
+    expect(initial.source).toBe('millipede');
+    expect(initial.splatCount).toBe(116_374);
+    await expect(page.locator('#status')).toContainText('116,374 splats');
+    await expect(page.locator('#license')).toContainText('Fabian Plum');
+
+    await page.locator('#source').selectOption('no-sh');
+    await page.waitForFunction(() => {
+      const state = window.__THREE_SOG_EXAMPLE__;
+      return state?.state === 'ready' && state.source === 'no-sh';
+    });
+    const replaced = await page.evaluate(() => window.__THREE_SOG_EXAMPLE__);
+    expect(replaced.backend).toBe(backend);
+    expect(replaced.splatCount).toBe(4);
+    expect(errors).toEqual([]);
+  });
+}
+
 test('decodes known WebP values without browser image transformations', async ({ page }) => {
   await page.goto('/');
   await page.waitForFunction(() => window.__SOG_EXAMPLE__?.state === 'ready');
