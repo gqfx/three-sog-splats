@@ -40,11 +40,11 @@ declare global {
 const parameters = new URLSearchParams(location.search);
 const forceWebGL = parameters.get('backend') === 'webgl';
 const fixture = parameters.get('fixture') === 'real'
-  ? 'millipede-10k.sog'
+  ? 'millipede.sog'
   : parameters.get('fixture') === 'sh'
     ? 'minimal-sh1.sog'
     : 'minimal-no-sh.sog';
-const isRealFixture = fixture === 'millipede-10k.sog';
+const isRealFixture = fixture === 'millipede.sog';
 const status = document.querySelector<HTMLElement>('#status')!;
 const diagnosticOutput = document.querySelector<HTMLElement>('#diagnostics')!;
 const viewport = document.querySelector<HTMLElement>('#viewport')!;

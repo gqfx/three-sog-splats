@@ -109,5 +109,6 @@ npm run test:acceptance
 
 合成测试夹具采用 CC0；两种 backend 的 no-SH/SH 浏览器结果使用容差截图。
 浏览器套件还会在两种 backend 中加载一个从 Three.js CC BY 4.0 Millipede
-示例转换得到的 10,000-Gaussian SOG。参见[夹具署名](./tests/fixtures/millipede-10k.license.txt)
+示例直接转换、未降采样的完整 116,374-Gaussian SOG。参见
+[夹具署名](./tests/fixtures/millipede.license.txt)
 与[兼容性审计](./docs/three-compatibility.md)。

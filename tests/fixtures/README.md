@@ -8,11 +8,10 @@ and are released under CC0-1.0. They contain only synthetic pixels and metadata:
 - `expected.json`: expected metadata, decoded bounds, source RGBA texels, and
   the tolerance used for lossy WebP browser checks.
 
-`generated/millipede-10k.sog` is a real-scene fixture derived from the
-`millipede.splat` asset in the Three.js repository. It contains 10,000
-Gaussians after merge-based decimation and is covered by a separate CC BY 4.0
-attribution in `millipede-10k.license.txt`; it is not part of the CC0 synthetic
-fixture set.
+`generated/millipede.sog` is a direct, full-resolution conversion of the
+116,374-Gaussian `millipede.splat` asset in the Three.js repository. It is
+covered by a separate CC BY 4.0 attribution in `millipede.license.txt`; it is
+not part of the CC0 synthetic fixture set.
 
 The WebP images are data images. They must be decoded without color conversion,
 premultiplication, filtering, mipmaps, or vertical flipping.

@@ -119,15 +119,15 @@ for (const backend of ['webgpu', 'webgl'] as const) {
     }
     expect(snapshot.state, snapshot.error ?? undefined).toBe('ready');
     expect(snapshot.backend).toBe(backend);
-    expect(snapshot.fixture).toBe('millipede-10k.sog');
-    expect(snapshot.diagnostics?.activeSplatCount).toBe(10_000);
+    expect(snapshot.fixture).toBe('millipede.sog');
+    expect(snapshot.diagnostics?.activeSplatCount).toBe(116_374);
     expect(snapshot.diagnostics?.readbackCount).toBe(backend === 'webgl' ? 1 : 0);
     expect(snapshot.diagnostics?.deferredUploadCount).toBe(0);
     expect(snapshot.diagnostics?.deferredCompileCount).toBe(0);
     expect(errors).toEqual([]);
     await waitForStableSort(page);
     await page.locator('aside').evaluate((element) => { element.style.visibility = 'hidden'; });
-    await expect(page.locator('canvas')).toHaveScreenshot(`${backend}-millipede-10k.png`, {
+    await expect(page.locator('canvas')).toHaveScreenshot(`${backend}-millipede.png`, {
       maxDiffPixelRatio: 0.025,
       threshold: 0.25,
     });

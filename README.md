@@ -128,6 +128,7 @@ npm run test:acceptance
 
 Synthetic fixtures are CC0 assets. Browser image baselines use tolerant
 comparisons for both backends and no-SH/SH variants. The browser suite also
-loads a 10,000-Gaussian SOG derived from Three.js's CC BY 4.0 Millipede example
-through both backends. See [fixture attribution](./tests/fixtures/millipede-10k.license.txt)
+loads a full-resolution 116,374-Gaussian SOG directly converted from Three.js's
+CC BY 4.0 Millipede example through both backends. See
+[fixture attribution](./tests/fixtures/millipede.license.txt)
 and the [compatibility audit](./docs/three-compatibility.md).

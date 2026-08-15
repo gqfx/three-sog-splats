@@ -35,7 +35,7 @@ artifacts in Headless Chrome with WebGPU enabled. Both runs passed:
 
 - synthetic no-SH and SH SOG rendering on WebGPU;
 - synthetic no-SH and SH rendering on the forced WebGL backend;
-- the real Three.js Millipede 10K SOG on both backends;
+- the full-resolution 116,374-Gaussian Three.js Millipede SOG on both backends;
 - known-value WebP data decoding.
 
 The r183 audit was intentionally treated as a negative boundary test. The scene

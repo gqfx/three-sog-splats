@@ -14,7 +14,7 @@ Compatibility window: Three.js 0.184.0-0.185.0
 | WebGPU path | Real browser no-SH/SH rendering, GPU order consumption, camera invalidation, static suppression, zero production readbacks, and a controlled test-only GPU-order readback matching the stable CPU oracle | Pass |
 | forced WebGL fallback | One center readback, Worker sort and pooled result transfer, instanced order upload, static suppression, stale-result disposal | Pass |
 | Scene/depth integration | Tolerant browser baselines include object transform and an opaque foreground occluder; depth test on and depth writes off | Pass |
-| Real asset | Three.js Millipede example decimated to 10,000 Gaussians and converted from SPLAT to SOG; WebGPU and forced WebGL snapshots | Pass |
+| Real asset | All 116,374 Gaussians from the Three.js Millipede SPLAT converted directly to SOG without decimation; WebGPU and forced WebGL snapshots | Pass |
 | First visible frame | Diagnostics and integration checks report zero deferred required uploads/compiles after `prepare()` | Pass |
 | External package | `npm pack`, temporary TypeScript consumer at the r184 lower bound, peer resolution, declarations, Vite build/startup, external imports, forbidden-code scan | Pass |
 | Limits and performance | Browser timings, CPU stress comparison, capacity boundaries, 2,000,000-splat memory guardrail | Pass |
@@ -26,4 +26,4 @@ whenever the compatibility baseline or fixture output changes.
 Final run: typecheck, lint, declaration build, 43 unit/integration tests, 7
 real-browser tests, and the external package-consumer check all passed. The
 browser run exercised WebGPU and forced WebGL for synthetic no-SH/SH fixtures
-and the real 10,000-Gaussian Millipede fixture.
+and the full-resolution 116,374-Gaussian Millipede fixture.
