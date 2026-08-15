@@ -1,0 +1,40 @@
+import { readFile, readdir } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import {
+  DataTexture,
+  StorageBufferAttribute,
+  WebGPURenderer,
+} from 'three/webgpu';
+import {
+  Fn,
+  atomicAdd,
+  instanceIndex,
+  storage,
+  textureLoad,
+  workgroupBarrier,
+} from 'three/tsl';
+
+describe('Three.js r185 public API contract', () => {
+  it('exports every primitive required by the compatibility adapter', () => {
+    expect(WebGPURenderer).toBeTypeOf('function');
+    expect(DataTexture).toBeTypeOf('function');
+    expect(StorageBufferAttribute).toBeTypeOf('function');
+    expect(Fn).toBeTypeOf('function');
+    expect(storage).toBeTypeOf('function');
+    expect(textureLoad).toBeTypeOf('function');
+    expect(atomicAdd).toBeTypeOf('function');
+    expect(workgroupBarrier).toBeTypeOf('function');
+    expect(instanceIndex).toBeDefined();
+  });
+
+  it('does not import unpublished Three.js renderer internals', async () => {
+    const root = resolve(import.meta.dirname, '../../src');
+    const files = (await readdir(root, { recursive: true })).filter((file) => file.endsWith('.ts'));
+    for (const file of files) {
+      const source = await readFile(resolve(root, file), 'utf8');
+      expect(source, file).not.toMatch(/three\/src\//);
+      expect(source, file).not.toMatch(/three\/build\//);
+    }
+  });
+});
