@@ -2,9 +2,9 @@
 
 ## Status
 
-This document records the initial technical direction for `three-sog-splats`.
-It is a design baseline, not a claim that every item described here has already
-been implemented.
+This document records the technical direction for `three-sog-splats`. The
+phase-one bundled-SOG MVP described below is implemented and acceptance-tested
+against Three.js r185; later streamed/LOD sections remain roadmap material.
 
 The first milestone is intentionally limited to loading and rendering one
 bundled SOG v2 asset. Chunked and LOD-streamed SOG support is a future direction,

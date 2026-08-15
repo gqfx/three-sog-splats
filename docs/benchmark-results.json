@@ -1,0 +1,29 @@
+{
+  "generatedAt": "2026-08-15T16:09:08.708Z",
+  "environment": {
+    "platform": "darwin",
+    "architecture": "arm64",
+    "node": "v24.14.0",
+    "browser": "HeadlessChrome/151.0.0.0",
+    "three": "0.185.0"
+  },
+  "fixtureResults": [
+    { "backend": "webgpu", "fixture": "minimal-no-sh.sog", "downloadMs": 2.4, "archiveMs": 12.0, "decodeMs": 8.4, "prepareMs": 22.0, "firstVisibleFrameMs": 4.9, "gpuBytes": 5344, "cpuBytes": 1088, "usedJsHeapBytes": 13271119, "readbacks": 0 },
+    { "backend": "webgpu", "fixture": "minimal-sh1.sog", "downloadMs": 2.0, "archiveMs": 10.4, "decodeMs": 8.6, "prepareMs": 23.6, "firstVisibleFrameMs": 6.3, "gpuBytes": 8448, "cpuBytes": 1088, "usedJsHeapBytes": 14720896, "readbacks": 0 },
+    { "backend": "webgl", "fixture": "minimal-no-sh.sog", "downloadMs": 1.7, "archiveMs": 10.2, "decodeMs": 6.1, "prepareMs": 94.3, "firstVisibleFrameMs": 5.8, "gpuBytes": 4272, "cpuBytes": 128, "usedJsHeapBytes": 14782495, "readbacks": 1 },
+    { "backend": "webgl", "fixture": "minimal-sh1.sog", "downloadMs": 1.9, "archiveMs": 10.3, "decodeMs": 7.8, "prepareMs": 93.9, "firstVisibleFrameMs": 8.5, "gpuBytes": 7376, "cpuBytes": 128, "usedJsHeapBytes": 14897323, "readbacks": 1 }
+  ],
+  "cpuStress": {
+    "count": 250000,
+    "centersAndOrderBytes": 4000000,
+    "nativeMvpEstimatedBytes": 13000000,
+    "fullExpandedSh3Bytes": 59000000,
+    "medianSortMs": 14.39,
+    "expandedToNativeRatio": 4.54
+  },
+  "mvpLimit": {
+    "splats": 2000000,
+    "estimatedNativeGpuBytes": 104000000,
+    "nextPowerOfTwoSortCapacity": 2097152
+  }
+}
