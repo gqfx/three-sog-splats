@@ -1,0 +1,77 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build and package output
+dist/
+build/
+out/
+*.tgz
+*.tsbuildinfo
+
+# Test, coverage, and browser-runner output
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+blob-report/
+benchmark-results/
+perf-results/
+
+# Tool caches
+.cache/
+.vite/
+.vitest/
+.turbo/
+.parcel-cache/
+.rollup.cache/
+.eslintcache
+.stylelintcache
+.prettier-cache
+
+# Logs and runtime diagnostics
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.cpuprofile
+*.heapsnapshot
+
+# Local environment files
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Local OpenSpec planning and generated agent skills
+openspec/
+.agents/skills/.openspec-target
+.agents/skills/openspec-*/
+
+# Temporary files
+.tmp/
+tmp/
+temp/
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# Editors and local workspace state
+.idea/
+.fleet/
+.history/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/settings.json
+!.vscode/tasks.json
+
+# Operating-system metadata
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
