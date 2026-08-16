@@ -14,6 +14,8 @@ import type { SOGResource } from '../src/index.js';
 type SourceKey = 'millipede' | 'no-sh' | 'sh';
 
 interface FramePerformanceMetrics {
+  readonly backend: string | null;
+  readonly activeSplatCount: number;
   readonly fps: number;
   readonly averageFrameMs: number;
   readonly p95FrameMs: number;
@@ -22,7 +24,15 @@ interface FramePerformanceMetrics {
   readonly p95CpuSubmitMs: number;
   readonly longFrameCount: number;
   readonly sampleFrames: number;
+  readonly totalSortCount: number;
   readonly sortsPerSecond: number;
+  readonly sortDurationMs: number;
+  readonly sortDurationKind: 'cpu-command-submission' | 'worker-execution' | null;
+  readonly viewport: {
+    readonly width: number;
+    readonly height: number;
+    readonly dpr: number;
+  };
 }
 
 interface SourceDefinition {
@@ -47,8 +57,13 @@ declare global {
       backend: string | null;
       source: SourceKey;
       splatCount: number;
+      totalSortCount: number;
       performance: FramePerformanceMetrics | null;
+      motion: 'idle' | 'orbit';
       error: string | null;
+      startCameraMotion(): void;
+      stopCameraMotion(): void;
+      resetPerformance(): void;
     };
   }
 }
@@ -93,14 +108,20 @@ const license = document.querySelector<HTMLElement>('#license')!;
 const diagnostics = document.querySelector<HTMLElement>('#diagnostics')!;
 const sourceSelect = document.querySelector<HTMLSelectElement>('#source')!;
 const backendSelect = document.querySelector<HTMLSelectElement>('#backend')!;
+const motionButton = document.querySelector<HTMLButtonElement>('#motion')!;
 
 const exampleState: Window['__THREE_SOG_EXAMPLE__'] = window.__THREE_SOG_EXAMPLE__ = {
   state: 'initializing',
   backend: null,
   source: initialSource,
   splatCount: 0,
+  totalSortCount: 0,
   performance: null,
+  motion: 'idle',
   error: null,
+  startCameraMotion: () => {},
+  stopCameraMotion: () => {},
+  resetPerformance: () => {},
 };
 
 sourceSelect.value = initialSource;
@@ -130,7 +151,7 @@ try {
 }
 
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
+controls.enableDamping = false;
 controls.target.set(0, 0, 0);
 controls.update();
 
@@ -148,6 +169,9 @@ let metricsSortCount = 0;
 const frameIntervals: number[] = [];
 const cpuSubmitDurations: number[] = [];
 const sampleLimit = 180;
+const motionAxis = new Vector3(0, 1, 0);
+const motionOffset = new Vector3();
+let previousAnimationAt: number | null = null;
 
 function rounded(value: number): number {
   return Math.round(value * 10) / 10;
@@ -175,6 +199,17 @@ function resetFrameMetrics(): void {
   performanceSummary.textContent = 'Measuring frame rate…';
 }
 
+function setCameraMotion(active: boolean): void {
+  exampleState.motion = active ? 'orbit' : 'idle';
+  motionButton.textContent = active ? 'Stop motion test' : 'Start motion test';
+  resetFrameMetrics();
+}
+
+exampleState.startCameraMotion = () => setCameraMotion(true);
+exampleState.stopCameraMotion = () => setCameraMotion(false);
+exampleState.resetPerformance = resetFrameMetrics;
+motionButton.addEventListener('click', () => setCameraMotion(exampleState.motion !== 'orbit'));
+
 function pushSample(samples: number[], value: number): void {
   samples.push(value);
   if (samples.length > sampleLimit) samples.shift();
@@ -194,6 +229,8 @@ function updateFrameMetrics(timestamp: number, cpuSubmitDurationMs: number): voi
   const sortCount = renderDiagnostics?.sortCount ?? metricsSortCount;
   const averageFrameMs = average(frameIntervals);
   const snapshot: FramePerformanceMetrics = {
+    backend: renderDiagnostics?.backend ?? null,
+    activeSplatCount: renderDiagnostics?.activeSplatCount ?? 0,
     fps: rounded(1_000 / averageFrameMs),
     averageFrameMs: rounded(averageFrameMs),
     p95FrameMs: rounded(percentile(frameIntervals, 0.95)),
@@ -202,7 +239,19 @@ function updateFrameMetrics(timestamp: number, cpuSubmitDurationMs: number): voi
     p95CpuSubmitMs: rounded(percentile(cpuSubmitDurations, 0.95)),
     longFrameCount: frameIntervals.filter((duration) => duration > 1000 / 30).length,
     sampleFrames: frameIntervals.length,
+    totalSortCount: sortCount,
     sortsPerSecond: rounded(((sortCount - metricsSortCount) * 1_000) / windowDurationMs),
+    sortDurationMs: rounded(renderDiagnostics?.sortDurationMs ?? 0),
+    sortDurationKind: renderDiagnostics?.backend === 'webgpu'
+      ? 'cpu-command-submission'
+      : renderDiagnostics?.backend === 'webgl'
+        ? 'worker-execution'
+        : null,
+    viewport: {
+      width: innerWidth,
+      height: innerHeight,
+      dpr: renderer.getPixelRatio(),
+    },
   };
   exampleState.performance = snapshot;
   performanceSummary.textContent = `${snapshot.fps.toFixed(1)} FPS · ${snapshot.averageFrameMs.toFixed(1)} ms avg · ${snapshot.p95FrameMs.toFixed(1)} ms p95 · ${snapshot.sortsPerSecond.toFixed(1)} sorts/s`;
@@ -220,12 +269,8 @@ function updateFrameMetrics(timestamp: number, cpuSubmitDurationMs: number): voi
   }
   if (timestamp - metricsLogAt >= 5_000 && currentMesh) {
     console.info('[three-sog-splats][performance]', {
-      backend: renderDiagnostics?.backend,
       source: exampleState.source,
-      activeSplatCount: renderDiagnostics?.activeSplatCount,
       ...snapshot,
-      sortSubmissionDurationMs: renderDiagnostics?.sortDurationMs,
-      totalSortCount: renderDiagnostics?.sortCount,
     });
     metricsLogAt = timestamp;
   }
@@ -344,8 +389,19 @@ addEventListener('resize', () => {
 
 renderer.setAnimationLoop((timestamp) => {
   const cpuStartedAt = performance.now();
+  const deltaSeconds = previousAnimationAt === null
+    ? 0
+    : Math.min((timestamp - previousAnimationAt) / 1_000, 0.1);
+  previousAnimationAt = timestamp;
+  if (exampleState.motion === 'orbit') {
+    motionOffset.copy(camera.position).sub(controls.target);
+    motionOffset.applyAxisAngle(motionAxis, Math.PI * 0.2 * deltaSeconds);
+    camera.position.copy(controls.target).add(motionOffset);
+    camera.lookAt(controls.target);
+  }
   controls.update();
   renderer.render(scene, camera);
+  exampleState.totalSortCount = currentMesh?.diagnostics.sortCount ?? 0;
   updateFrameMetrics(timestamp, performance.now() - cpuStartedAt);
 });
 

@@ -167,11 +167,37 @@ for (const backend of ['webgpu', 'webgl'] as const) {
     expect(initial.splatCount).toBe(116_374);
     await expect(page.locator('#status')).toContainText('116,374 splats');
     await expect(page.locator('#license')).toContainText('Fabian Plum');
-    await page.waitForFunction(() => (window.__THREE_SOG_EXAMPLE__.performance?.sampleFrames ?? 0) > 0);
+    await page.evaluate(() => window.__THREE_SOG_EXAMPLE__.resetPerformance());
+    await page.waitForFunction(() => (window.__THREE_SOG_EXAMPLE__.performance?.sampleFrames ?? 0) >= 170);
     const performance = await page.evaluate(() => window.__THREE_SOG_EXAMPLE__.performance);
     expect(performance?.fps).toBeGreaterThan(0);
     expect(performance?.averageFrameMs).toBeGreaterThan(0);
+    expect(performance?.backend).toBe(backend);
+    expect(performance?.activeSplatCount).toBe(116_374);
+    expect(performance?.totalSortCount).toBeGreaterThan(0);
+    expect(performance?.sortDurationKind).toBe(
+      backend === 'webgpu' ? 'cpu-command-submission' : 'worker-execution',
+    );
+    expect(performance?.viewport).toEqual({ width: 960, height: 640, dpr: 1 });
+    await expect.poll(() => page.evaluate(
+      () => window.__THREE_SOG_EXAMPLE__.performance?.sortsPerSecond,
+    )).toBe(0);
     await expect(page.locator('#performance-summary')).toContainText('FPS');
+
+    const idleSortCount = await page.evaluate(() => window.__THREE_SOG_EXAMPLE__.totalSortCount);
+    await page.evaluate(() => window.__THREE_SOG_EXAMPLE__.startCameraMotion());
+    await expect.poll(() => page.evaluate(
+      () => window.__THREE_SOG_EXAMPLE__.totalSortCount,
+    )).toBeGreaterThan(idleSortCount);
+    await page.evaluate(() => window.__THREE_SOG_EXAMPLE__.stopCameraMotion());
+    const releasedSortCount = await page.evaluate(() => window.__THREE_SOG_EXAMPLE__.totalSortCount);
+    await page.waitForTimeout(100);
+    expect(await page.evaluate(() => window.__THREE_SOG_EXAMPLE__.totalSortCount))
+      .toBeLessThanOrEqual(releasedSortCount + 1);
+    await page.waitForFunction(() => (window.__THREE_SOG_EXAMPLE__.performance?.sampleFrames ?? 0) >= 170);
+    await expect.poll(() => page.evaluate(
+      () => window.__THREE_SOG_EXAMPLE__.performance?.sortsPerSecond,
+    )).toBe(0);
 
     await page.locator('#source').selectOption('no-sh');
     await page.waitForFunction(() => {
