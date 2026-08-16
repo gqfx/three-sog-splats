@@ -136,6 +136,37 @@ test('validates Portable radix edge fixtures on WebGPU when available', async ({
   expect(errors).toEqual([]);
 });
 
+test('validates OneSweep against Portable only on admitted hardware', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('console', (message) => {
+    if (/GPUValidationError|validation error/i.test(message.text())) errors.push(message.text());
+  });
+  await page.goto('/?fixture=no-sh');
+  await page.waitForFunction(() => ['ready', 'failed'].includes(window.__SOG_EXAMPLE__?.state));
+  const snapshot = await page.evaluate(() => window.__SOG_EXAMPLE__);
+  if (snapshot.state !== 'ready' || snapshot.backend !== 'webgpu') {
+    test.skip(true, 'WebGPU is unavailable in this browser environment.');
+  }
+  const verification = await page.evaluate(
+    () => window.__SOG_EXAMPLE__.verifyOneSweepIfAdmitted(),
+  );
+  if (verification.status === 'passed') {
+    expect(verification.reason).toBe('validated-nvidia-subgroups');
+    expect(verification.portable?.complete).toBe(true);
+    expect(verification.portable?.stable).toBe(true);
+    expect(verification.onesweep?.complete).toBe(true);
+    expect(verification.onesweep?.monotonic).toBe(true);
+    expect(verification.onesweep?.stable).toBe(true);
+    expect(verification.exactMatch).toBe(true);
+  } else {
+    expect(verification.reason).not.toBe('validated-nvidia-subgroups');
+    expect(verification.portable).toBeNull();
+    expect(verification.onesweep).toBeNull();
+  }
+  expect(errors).toEqual([]);
+});
+
 for (const backend of ['webgpu', 'webgl'] as const) {
   test(`renders the real Three.js millipede fixture with ${backend}`, async ({ page }) => {
     const errors: string[] = [];

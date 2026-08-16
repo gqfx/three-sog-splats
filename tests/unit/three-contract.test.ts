@@ -8,10 +8,17 @@ import {
 } from 'three/webgpu';
 import {
   Fn,
+  array,
   atomicAdd,
+  atomicLoad,
+  countOneBits,
   instanceIndex,
   storage,
+  subgroupBallot,
+  subgroupExclusiveAdd,
+  subgroupShuffle,
   textureLoad,
+  workgroupArray,
   workgroupBarrier,
 } from 'three/tsl';
 
@@ -21,9 +28,16 @@ describe('Three.js r184-r185 public API contract', () => {
     expect(DataTexture).toBeTypeOf('function');
     expect(StorageBufferAttribute).toBeTypeOf('function');
     expect(Fn).toBeTypeOf('function');
+    expect(array).toBeTypeOf('function');
     expect(storage).toBeTypeOf('function');
     expect(textureLoad).toBeTypeOf('function');
     expect(atomicAdd).toBeTypeOf('function');
+    expect(atomicLoad).toBeTypeOf('function');
+    expect(countOneBits).toBeTypeOf('function');
+    expect(subgroupBallot).toBeTypeOf('function');
+    expect(subgroupExclusiveAdd).toBeTypeOf('function');
+    expect(subgroupShuffle).toBeTypeOf('function');
+    expect(workgroupArray).toBeTypeOf('function');
     expect(workgroupBarrier).toBeTypeOf('function');
     expect(instanceIndex).toBeDefined();
   });

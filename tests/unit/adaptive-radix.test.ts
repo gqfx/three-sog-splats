@@ -1,4 +1,5 @@
 import { Box3, Matrix4, Vector3 } from 'three/webgpu';
+import type { WebGPURenderer } from 'three/webgpu';
 import { describe, expect, it } from 'vitest';
 import {
   adaptiveDepthToKey,
@@ -11,7 +12,7 @@ import {
   sanitizeDepthRange,
 } from '../../src/render/sort/adaptive.js';
 import { radixSortKeyValues } from '../../src/render/sort/radix.js';
-import { evaluateRadixAdmission } from '../../src/render/sort/selection.js';
+import { evaluateRadixAdmission, selectRadixBackend } from '../../src/render/sort/selection.js';
 
 describe('adaptive radix reference behavior', () => {
   it.each([
@@ -105,5 +106,25 @@ describe('conservative radix backend admission', () => {
     [{ ...admitted, adapterInfo: { vendor: 'nvidia', subgroupMinSize: 64 } }, 'subgroup-size-too-large'],
   ] as const)('falls back to Portable for unsafe signal sets', (signals, reason) => {
     expect(evaluateRadixAdmission(signals)).toMatchObject({ kind: 'portable', reason });
+  });
+
+  it('supports deterministic dependency injection without an unsafe public switch', async () => {
+    const renderer = {} as WebGPURenderer;
+    await expect(selectRadixBackend(renderer, {
+      hasSubgroups: () => true,
+      hasCustomDevice: () => false,
+      resolveAdapterInfo: async () => ({
+        info: { vendor: 'nvidia', subgroupMinSize: 32 },
+        identityCorrelated: true,
+      }),
+    })).resolves.toMatchObject({ kind: 'onesweep' });
+    await expect(selectRadixBackend(renderer, {
+      hasSubgroups: () => true,
+      hasCustomDevice: () => true,
+      resolveAdapterInfo: async () => ({
+        info: { vendor: 'nvidia', subgroupMinSize: 32 },
+        identityCorrelated: true,
+      }),
+    })).resolves.toMatchObject({ kind: 'portable', reason: 'custom-device' });
   });
 });

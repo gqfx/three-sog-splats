@@ -11,7 +11,9 @@ import {
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { BrowserSOGImageDecoder, SOGGaussianSplatMesh, SOGLoader } from '../src/index.js';
 import type { SOGLoadDiagnostics, SOGRenderDiagnostics } from '../src/index.js';
+import { OneSweepRadixSortBackend } from '../src/render/sort/OneSweepRadixSortBackend.js';
 import { PortableRadixSortBackend } from '../src/render/sort/PortableRadixSortBackend.js';
+import { selectRadixBackend } from '../src/render/sort/selection.js';
 
 interface GpuSortVerification {
   readonly order: number[];
@@ -19,6 +21,14 @@ interface GpuSortVerification {
   readonly complete: boolean;
   readonly monotonic: boolean;
   readonly stable: boolean;
+}
+
+interface OneSweepVerification {
+  readonly status: 'passed' | 'not-admitted';
+  readonly reason: string;
+  readonly portable: GpuSortVerification | null;
+  readonly onesweep: GpuSortVerification | null;
+  readonly exactMatch: boolean;
 }
 
 declare global {
@@ -36,6 +46,7 @@ declare global {
       decodeFixtureTexel(filename: string): Promise<number[]>;
       verifyGpuSort(): Promise<GpuSortVerification>;
       verifyPortableRadixFixtures(): Promise<Record<string, GpuSortVerification>>;
+      verifyOneSweepIfAdmitted(): Promise<OneSweepVerification>;
     };
   }
 }
@@ -67,6 +78,13 @@ const state: Window['__SOG_EXAMPLE__'] = window.__SOG_EXAMPLE__ = {
     order: [], buckets: [], complete: false, monotonic: false, stable: false,
   }),
   verifyPortableRadixFixtures: async () => ({}),
+  verifyOneSweepIfAdmitted: async () => ({
+    status: 'not-admitted',
+    reason: 'renderer-not-ready',
+    portable: null,
+    onesweep: null,
+    exactMatch: false,
+  }),
 };
 
 state.decodeFixtureTexel = async (filename) => {
@@ -142,6 +160,71 @@ state.verifyPortableRadixFixtures = async () => {
     results[name] = await verifyPortableKeys(keys, 12);
   }
   return results;
+};
+
+state.verifyOneSweepIfAdmitted = async () => {
+  if (state.backend !== 'webgpu') {
+    return {
+      status: 'not-admitted',
+      reason: 'webgpu-unavailable',
+      portable: null,
+      onesweep: null,
+      exactMatch: false,
+    };
+  }
+  const selection = await selectRadixBackend(renderer);
+  if (selection.kind !== 'onesweep') {
+    return {
+      status: 'not-admitted',
+      reason: selection.reason,
+      portable: null,
+      onesweep: null,
+      exactMatch: false,
+    };
+  }
+
+  const keys = Uint32Array.from(
+    { length: 7_681 },
+    (_, index) => ((index * 2246822519) >>> 0) & 0xffff,
+  );
+  const portable = await verifyPortableKeys(keys, 16);
+  const input = new StorageBufferAttribute(keys, 1);
+  const sorter = new OneSweepRadixSortBackend(
+    keys.length,
+    input,
+    16,
+    selection.adapterInfo!.subgroupMinSize!,
+  );
+  try {
+    await sorter.sortAsync(renderer);
+    const order = new Uint32Array(
+      await renderer.getArrayBufferAsync(sorter.orderAttribute),
+    ).slice(0, keys.length);
+    const complete = new Set(order).size === keys.length
+      && order.every((index) => index < keys.length);
+    const monotonic = order.every((index, position) => (
+      position === 0 || keys[order[position - 1]!]! <= keys[index]!
+    ));
+    const expected = [...keys.keys()].sort((left, right) => keys[left]! - keys[right]! || left - right);
+    const stable = [...order].every((value, index) => value === expected[index]);
+    const onesweep: GpuSortVerification = {
+      order: [...order],
+      buckets: [...keys],
+      complete,
+      monotonic,
+      stable,
+    };
+    return {
+      status: 'passed',
+      reason: selection.reason,
+      portable,
+      onesweep,
+      exactMatch: onesweep.order.every((value, index) => value === portable.order[index]),
+    };
+  } finally {
+    sorter.dispose();
+    input.dispose();
+  }
 };
 
 const scene = new Scene();
