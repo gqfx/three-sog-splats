@@ -34,12 +34,12 @@ Primary sources:
 The same nine Playwright cases were run against the official r184 and r185 npm
 artifacts in Headless Chrome with WebGPU enabled. Both runs passed:
 
-- synthetic no-SH and SH SOG rendering on WebGPU;
-- synthetic no-SH and SH rendering on the forced WebGL backend;
+- internal synthetic no-SH and SH SOG rendering on WebGPU;
+- internal synthetic no-SH and SH rendering on the forced WebGL backend;
 - the full-resolution 116,374-Gaussian Three.js Millipede SOG on both backends;
 - the public example's stationary suppression, deterministic motion/recovery,
-  backend switching, structured telemetry, and full-resolution
-  195,099-Gaussian Lion SH2 snapshot on both backends;
+  backend switching, structured telemetry, and full-resolution Millipede no-SH
+  and 195,099-Gaussian Lion SH2 snapshots on both backends;
 - local-space SH evaluation for a rotated object and top-to-bottom WebGL center
   indexing before Worker sorting;
 - known-value WebP data decoding.

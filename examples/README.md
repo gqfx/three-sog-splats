@@ -7,13 +7,14 @@ selection, camera fitting, resize handling, and deterministic replacement and
 disposal of the current asset.
 
 The implementation is original to this package and uses `SOGLoader` plus
-`SOGGaussianSplatMesh` directly. It loads the full 116,374-Gaussian Millipede
-SOG by default. The optional SH source is the complete 195,099-Gaussian,
-two-band SH Lion model from the Three.js example, transcoded directly from SPZ
-v3 without decimation, filtering, or SH-band reduction. The small synthetic SH1
-fixture remains in `index.html` for deterministic shader tests and is not
-presented as a public model. The example can switch between the WebGPU and
-forced WebGL backends.
+`SOGGaussianSplatMesh` directly. Its no-SH source is the full
+116,374-Gaussian Millipede SOG. Its SH source is the complete
+195,099-Gaussian, two-band SH Lion model from the Three.js example, transcoded
+directly from SPZ v3 without decimation, filtering, or SH-band reduction. The
+small synthetic no-SH and SH1 fixtures remain in `index.html` for deterministic
+tests and are not presented as public models. The example can switch between
+the WebGPU and forced WebGL backends. The legacy `source=millipede` query is
+accepted as an alias for `source=no-sh`.
 
 The Lion fixture also exercises the production SOG v2 SH layout: its metadata
 declares a 65,536-entry, two-band palette and its centroid texture is
