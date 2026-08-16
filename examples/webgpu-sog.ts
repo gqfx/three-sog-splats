@@ -13,6 +13,18 @@ import type { SOGResource } from '../src/index.js';
 
 type SourceKey = 'millipede' | 'no-sh' | 'sh';
 
+interface FramePerformanceMetrics {
+  readonly fps: number;
+  readonly averageFrameMs: number;
+  readonly p95FrameMs: number;
+  readonly maxFrameMs: number;
+  readonly averageCpuSubmitMs: number;
+  readonly p95CpuSubmitMs: number;
+  readonly longFrameCount: number;
+  readonly sampleFrames: number;
+  readonly sortsPerSecond: number;
+}
+
 interface SourceDefinition {
   readonly name: string;
   readonly url: string;
@@ -35,6 +47,7 @@ declare global {
       backend: string | null;
       source: SourceKey;
       splatCount: number;
+      performance: FramePerformanceMetrics | null;
       error: string | null;
     };
   }
@@ -75,6 +88,7 @@ const initialSource: SourceKey = requestedSource && requestedSource in sources
   : 'millipede';
 const forceWebGL = parameters.get('backend') === 'webgl';
 const status = document.querySelector<HTMLElement>('#status')!;
+const performanceSummary = document.querySelector<HTMLElement>('#performance-summary')!;
 const license = document.querySelector<HTMLElement>('#license')!;
 const diagnostics = document.querySelector<HTMLElement>('#diagnostics')!;
 const sourceSelect = document.querySelector<HTMLSelectElement>('#source')!;
@@ -85,6 +99,7 @@ const exampleState: Window['__THREE_SOG_EXAMPLE__'] = window.__THREE_SOG_EXAMPLE
   backend: null,
   source: initialSource,
   splatCount: 0,
+  performance: null,
   error: null,
 };
 
@@ -126,6 +141,95 @@ let currentController: AbortController | null = null;
 let loadGeneration = 0;
 let disposed = false;
 let lastDiagnostics = '';
+let previousFrameAt: number | null = null;
+let metricsWindowStartedAt = performance.now();
+let metricsLogAt = metricsWindowStartedAt;
+let metricsSortCount = 0;
+const frameIntervals: number[] = [];
+const cpuSubmitDurations: number[] = [];
+const sampleLimit = 180;
+
+function rounded(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+function average(values: readonly number[]): number {
+  return values.length === 0 ? 0 : values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function percentile(values: readonly number[], ratio: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1)]!;
+}
+
+function resetFrameMetrics(): void {
+  const timestamp = performance.now();
+  previousFrameAt = null;
+  metricsWindowStartedAt = timestamp;
+  metricsLogAt = timestamp;
+  metricsSortCount = currentMesh?.diagnostics.sortCount ?? 0;
+  frameIntervals.length = 0;
+  cpuSubmitDurations.length = 0;
+  exampleState.performance = null;
+  performanceSummary.textContent = 'Measuring frame rate…';
+}
+
+function pushSample(samples: number[], value: number): void {
+  samples.push(value);
+  if (samples.length > sampleLimit) samples.shift();
+}
+
+function updateFrameMetrics(timestamp: number, cpuSubmitDurationMs: number): void {
+  if (previousFrameAt !== null) {
+    const interval = timestamp - previousFrameAt;
+    if (interval > 0 && interval < 1_000) pushSample(frameIntervals, interval);
+  }
+  previousFrameAt = timestamp;
+  pushSample(cpuSubmitDurations, cpuSubmitDurationMs);
+  const windowDurationMs = timestamp - metricsWindowStartedAt;
+  if (windowDurationMs < 1_000 || frameIntervals.length === 0) return;
+
+  const renderDiagnostics = currentMesh?.diagnostics;
+  const sortCount = renderDiagnostics?.sortCount ?? metricsSortCount;
+  const averageFrameMs = average(frameIntervals);
+  const snapshot: FramePerformanceMetrics = {
+    fps: rounded(1_000 / averageFrameMs),
+    averageFrameMs: rounded(averageFrameMs),
+    p95FrameMs: rounded(percentile(frameIntervals, 0.95)),
+    maxFrameMs: rounded(Math.max(...frameIntervals)),
+    averageCpuSubmitMs: rounded(average(cpuSubmitDurations)),
+    p95CpuSubmitMs: rounded(percentile(cpuSubmitDurations, 0.95)),
+    longFrameCount: frameIntervals.filter((duration) => duration > 1000 / 30).length,
+    sampleFrames: frameIntervals.length,
+    sortsPerSecond: rounded(((sortCount - metricsSortCount) * 1_000) / windowDurationMs),
+  };
+  exampleState.performance = snapshot;
+  performanceSummary.textContent = `${snapshot.fps.toFixed(1)} FPS · ${snapshot.averageFrameMs.toFixed(1)} ms avg · ${snapshot.p95FrameMs.toFixed(1)} ms p95 · ${snapshot.sortsPerSecond.toFixed(1)} sorts/s`;
+  metricsWindowStartedAt = timestamp;
+  metricsSortCount = sortCount;
+
+  const nextDiagnostics = JSON.stringify({
+    performance: snapshot,
+    load: currentResource?.diagnostics ?? null,
+    render: renderDiagnostics ?? null,
+  }, null, 2);
+  if (nextDiagnostics !== lastDiagnostics) {
+    diagnostics.textContent = nextDiagnostics;
+    lastDiagnostics = nextDiagnostics;
+  }
+  if (timestamp - metricsLogAt >= 5_000 && currentMesh) {
+    console.info('[three-sog-splats][performance]', {
+      backend: renderDiagnostics?.backend,
+      source: exampleState.source,
+      activeSplatCount: renderDiagnostics?.activeSplatCount,
+      ...snapshot,
+      sortSubmissionDurationMs: renderDiagnostics?.sortDurationMs,
+      totalSortCount: renderDiagnostics?.sortCount,
+    });
+    metricsLogAt = timestamp;
+  }
+}
 
 function setLicense(source: SourceDefinition): void {
   license.replaceChildren();
@@ -217,6 +321,7 @@ async function loadSource(key: SourceKey): Promise<void> {
     exampleState.backend = mesh.diagnostics.backend;
     exampleState.splatCount = resource.count;
     status.textContent = `${source.name} · ${resource.count.toLocaleString()} splats · ${mesh.diagnostics.backend}`;
+    resetFrameMetrics();
   } catch (error) {
     mesh?.dispose();
     resource?.dispose();
@@ -237,16 +342,15 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-renderer.setAnimationLoop(() => {
+renderer.setAnimationLoop((timestamp) => {
+  const cpuStartedAt = performance.now();
   controls.update();
   renderer.render(scene, camera);
-  if (currentMesh) {
-    const nextDiagnostics = JSON.stringify(currentMesh.diagnostics, null, 2);
-    if (nextDiagnostics !== lastDiagnostics) {
-      diagnostics.textContent = nextDiagnostics;
-      lastDiagnostics = nextDiagnostics;
-    }
-  }
+  updateFrameMetrics(timestamp, performance.now() - cpuStartedAt);
+});
+
+addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') resetFrameMetrics();
 });
 
 addEventListener('pagehide', () => {

@@ -56,6 +56,11 @@ a:hover { text-decoration: underline; }
   color: #c7cbd5;
 }
 
+#performance-summary {
+  color: #8ed6a8 !important;
+  font-variant-numeric: tabular-nums;
+}
+
 #controls {
   position: fixed;
   z-index: 3;

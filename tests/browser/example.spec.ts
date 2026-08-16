@@ -163,6 +163,11 @@ for (const backend of ['webgpu', 'webgl'] as const) {
     expect(initial.splatCount).toBe(116_374);
     await expect(page.locator('#status')).toContainText('116,374 splats');
     await expect(page.locator('#license')).toContainText('Fabian Plum');
+    await page.waitForFunction(() => (window.__THREE_SOG_EXAMPLE__.performance?.sampleFrames ?? 0) > 0);
+    const performance = await page.evaluate(() => window.__THREE_SOG_EXAMPLE__.performance);
+    expect(performance?.fps).toBeGreaterThan(0);
+    expect(performance?.averageFrameMs).toBeGreaterThan(0);
+    await expect(page.locator('#performance-summary')).toContainText('FPS');
 
     await page.locator('#source').selectOption('no-sh');
     await page.waitForFunction(() => {
