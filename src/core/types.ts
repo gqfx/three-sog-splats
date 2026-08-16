@@ -101,6 +101,7 @@ export interface SOGImageDecoder {
 export type SOGResourceState = 'ready' | 'disposed';
 export type SOGMeshState = 'unprepared' | 'preparing' | 'ready' | 'failed' | 'disposed';
 export type SOGBackendKind = 'webgpu' | 'webgl';
+export type SOGRadixBackendKind = 'portable' | 'onesweep';
 
 export interface SOGPrepareOptions {
   readonly signal?: AbortSignal;
@@ -108,6 +109,9 @@ export interface SOGPrepareOptions {
 
 export interface SOGRenderDiagnostics {
   backend: SOGBackendKind | null;
+  radixBackend: SOGRadixBackendKind | null;
+  radixBits: number;
+  radixSelectionReason: string | null;
   prepareDurationMs: number;
   uploadDurationMs: number;
   compileDurationMs: number;

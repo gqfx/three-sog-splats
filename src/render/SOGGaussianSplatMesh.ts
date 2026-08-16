@@ -121,6 +121,9 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
     this.renderOrder = 1;
     this.#diagnostics = {
       backend: null,
+      radixBackend: null,
+      radixBits: 0,
+      radixSelectionReason: null,
       prepareDurationMs: 0,
       uploadDurationMs: 0,
       compileDurationMs: 0,
