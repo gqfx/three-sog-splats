@@ -39,6 +39,8 @@ export interface BottleneckAnalysis {
   readonly source: string;
   readonly backend: string | null;
   readonly splatCount: number;
+  readonly sourceSplatCount: number;
+  readonly runtimeCopyCount: number;
   readonly timestampSupported: boolean;
   readonly startedAt: string;
   readonly completedAt: string;

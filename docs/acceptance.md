@@ -16,23 +16,28 @@ Compatibility window: Three.js 0.184.0-0.185.0
 | forced WebGL fallback | One center readback with framebuffer-row normalization, Worker sort and pooled result transfer, instanced order upload, static suppression, stale-result disposal | Pass |
 | Scene/depth integration | Tolerant browser baselines include object transform and an opaque foreground occluder; depth test on and depth writes off | Pass |
 | Real assets | All 116,374 Millipede Gaussians and all 195,099 Lion Gaussians with SH2 from Three.js converted directly to SOG without decimation; WebGPU and forced WebGL snapshots | Pass |
-| Public example | Three.js-style standalone page, real no-SH and SH model selection, source replacement, camera fitting, attribution, dual-backend snapshots, deterministic motion/recovery control, structured performance diagnostics, WebGPU/WebGL selection, and production build | Pass |
+| Public example | Three.js-style standalone page, real no-SH and SH model selection, one-download 25-instance Lion grid, source replacement, camera fitting, attribution, dual-backend snapshots, deterministic motion/recovery control, structured GPU bottleneck profiling, WebGPU/WebGL selection, and production build | Pass |
 | First visible frame | Diagnostics and integration checks report zero deferred required uploads/compiles after `prepare()` | Pass |
 | External package | `npm pack`, temporary TypeScript consumer at the r184 lower bound, peer resolution, declarations, Vite build/startup, external imports, forbidden-code scan | Pass |
-| Limits and performance | Full-resolution idle/orbit/recovery timings for Millipede and Lion on both backends, a real 5,000,000-splat WebGPU stress scene, exact dual-radix allocation, zero-readback checks, and the 5,000,000-splat guardrail | Pass |
+| Limits and performance | Full-resolution idle/orbit/recovery timings for Millipede and Lion on both backends, a real 5,000,000-splat WebGPU stress scene, a 4,877,475-splat runtime Lion grid sharing one 195,099-splat payload, controlled GPU render/compute attribution, exact dual-radix allocation, zero-readback checks, and the 5,000,000-splat guardrail | Pass |
 
 Release validation is run with `npm run test:acceptance`, which includes the
 browser and external-consumer gates. The final command record is updated
 whenever the compatibility baseline or fixture output changes.
 
-Final run: typecheck, lint, declaration and example builds, 97 unit/integration
-tests, 11 real-browser tests on both r184 and r185, and the external
+Final run: typecheck, lint, declaration and example builds, 101 unit/integration
+tests, 13 real-browser tests on both r184 and r185, and the external
 package-consumer check all passed. The browser run exercised WebGPU and forced
 WebGL for internal synthetic no-SH/SH fixtures and the full-resolution
 116,374-Gaussian Millipede fixture without decimation. The two public-example
 cases loaded and visually compared both real public choices: Millipede no-SH
 and the complete 195,099-Gaussian Lion SH2 fixture without decimation,
 filtering, or SH-band reduction.
+
+The WebGPU browser run also constructed a 5×5 Lion grid with 4,877,475 logical
+splats from one `/lion.sog` request and one prepared GPU payload. It verified 25
+runtime copies, 51 full-frame draw calls, 19,509,901 triangles, no expanded
+grid fixture request, and successful controlled full/half/quarter-DPR profiling.
 
 The local Chrome adapter was not an admitted NVIDIA target. Its OneSweep
 result is therefore explicitly hardware-conditioned: source/API compilation

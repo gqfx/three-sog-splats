@@ -105,7 +105,7 @@ MVP 支持单个全资源 active range、SOG v2 stored/deflated ZIP、no-SH 和�
 
 运行 `npm run example` 后打开
 `http://127.0.0.1:4173/webgpu_sog.html`。公开示例沿用 Three.js Gaussian
-Splatting example 的页面结构，来源列表只展示真实模型：no-SH 使用完整
+Splatting example 的页面结构，真实模型选项包括：no-SH 使用完整
 116,374-Gaussian Millipede，SH 使用从 Three.js 示例直接转换的完整
 195,099-Gaussian Lion SH2。两者都没有降采样或过滤，Lion 也没有削减 SH
 阶数；还可切换 WebGPU backend 或强制 WebGL backend。
@@ -114,6 +114,9 @@ Splatting example 的页面结构，来源列表只展示真实模型：no-SH �
 DPR 和 backend 对应的排序计时含义。参见[示例说明](./examples/README.md)。
 来源列表还包含可复现的 5,000,000-splat 合成 WebGPU 压测场景；Portable 路径报告
 约 200 MB GPU 资源，若当前为强制 WebGL 会自动切换到 WebGPU。
+为了与真实数据对照，Lion grid 只下载一次同一份 3.3 MB Lion SOG，并让 25 个平移
+后的运行时绘制实例共享已准备好的纹理、SH palette、材质和排序 buffer，逻辑总数为
+4,877,475 splats；仓库和 GPU 都不会保存 25 份展开后的源数据。
 
 ## 开发验证
 

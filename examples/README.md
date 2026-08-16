@@ -20,6 +20,14 @@ The source selector also exposes a reproducible 5,000,000-splat colored
 lattice for WebGPU memory, sorting, and overdraw stress. Generate it with
 `npm run generate:5m`; forced WebGL redirects this source to WebGPU.
 
+For a less adversarial comparison, **Lion grid** downloads and decodes the
+existing 195,099-splat SH2 Lion exactly once, then creates 25 translated draw
+instances in a 5×5 layout at runtime. The instances share the decoded textures,
+material, SH palette, and sort order, so the logical render count is 4,877,475
+without storing or uploading 25 physical copies of the source payload. Its
+translations do not change each Lion's internal depth order, and the copies do
+not overlap on screen. Forced WebGL redirects this source to WebGPU.
+
 The Lion fixture also exercises the production SOG v2 SH layout: its metadata
 declares a 65,536-entry, two-band palette and its centroid texture is
 512×1024. The loader derives this geometry from `shN.count` and `shN.bands`;

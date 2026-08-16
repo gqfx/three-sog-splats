@@ -363,6 +363,43 @@ test('controlled profiler isolates render, resolution, and camera-sort stages', 
   expect(errors).toEqual([]);
 });
 
+test('builds the 4.88M Lion grid from one downloaded and prepared source', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('console', (message) => {
+    if (/GPUValidationError|validation error|buffer is not big enough/i.test(message.text())) {
+      errors.push(message.text());
+    }
+  });
+  await page.goto('/webgpu_sog.html?source=lion-grid-5m');
+  await page.waitForFunction(() => ['ready', 'failed'].includes(window.__THREE_SOG_EXAMPLE__?.state));
+  const initial = await page.evaluate(() => window.__THREE_SOG_EXAMPLE__);
+  if (initial.state !== 'ready' || initial.backend !== 'webgpu') {
+    test.skip(true, 'WebGPU is unavailable in this browser environment.');
+  }
+
+  expect(initial.source).toBe('lion-grid-5m');
+  expect(initial.sourceSplatCount).toBe(195_099);
+  expect(initial.runtimeCopyCount).toBe(25);
+  expect(initial.splatCount).toBe(4_877_475);
+  await expect(page.locator('#source')).toHaveValue('lion-grid-5m');
+  await expect(page.locator('#status')).toContainText('4,877,475 splats');
+  await expect(page.locator('#license')).toContainText('one full SOG download');
+  await page.waitForFunction(() => (window.__THREE_SOG_EXAMPLE__.performance?.sampleFrames ?? 0) >= 10);
+  const snapshot = await page.evaluate(() => ({
+    performance: window.__THREE_SOG_EXAMPLE__.performance,
+    resources: performance.getEntriesByType('resource').map((entry) => entry.name),
+  }));
+  expect(snapshot.performance?.activeSplatCount).toBe(4_877_475);
+  expect(snapshot.performance?.sourceSplatCount).toBe(195_099);
+  expect(snapshot.performance?.runtimeCopyCount).toBe(25);
+  expect(snapshot.performance?.drawCalls).toBe(51);
+  expect(snapshot.performance?.triangles).toBe(19_509_901);
+  expect(snapshot.resources.filter((url) => url.endsWith('/lion.sog'))).toHaveLength(1);
+  expect(snapshot.resources.some((url) => /lion-grid-5m\.sog/.test(url))).toBe(false);
+  expect(errors).toEqual([]);
+});
+
 test('decodes known WebP values without browser image transformations', async ({ page }) => {
   await page.goto('/');
   await page.waitForFunction(() => window.__SOG_EXAMPLE__?.state === 'ready');

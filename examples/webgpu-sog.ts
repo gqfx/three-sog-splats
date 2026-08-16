@@ -1,10 +1,14 @@
 import {
+  Box3,
   Color,
   DoubleSide,
   Euler,
+  Group,
   MathUtils,
+  Mesh,
   PerspectiveCamera,
   Scene,
+  Sphere,
   TimestampQuery,
   Vector3,
   WebGPURenderer,
@@ -19,7 +23,8 @@ import {
   type BottleneckSortMeasurement,
 } from './bottleneck-analysis.js';
 
-type SourceKey = 'no-sh' | 'sh' | 'stress-5m';
+type SourceKey = 'no-sh' | 'sh' | 'stress-5m' | 'lion-grid-5m';
+type SOGDrawMesh = Mesh<SOGGaussianSplatMesh['geometry'], SOGGaussianSplatMesh['material']>;
 
 interface FramePerformanceMetrics {
   readonly backend: string | null;
@@ -27,6 +32,8 @@ interface FramePerformanceMetrics {
   readonly radixBits: number;
   readonly radixSelectionReason: string | null;
   readonly activeSplatCount: number;
+  readonly sourceSplatCount: number;
+  readonly runtimeCopyCount: number;
   readonly fps: number;
   readonly averageFrameMs: number;
   readonly p95FrameMs: number;
@@ -60,6 +67,10 @@ interface SourceDefinition {
   readonly cameraDirection: Vector3;
   readonly rotation?: Euler;
   readonly scale?: number;
+  readonly runtimeGrid?: {
+    readonly columns: number;
+    readonly rows: number;
+  };
   readonly credit?: {
     readonly author: string;
     readonly authorUrl: string;
@@ -76,6 +87,8 @@ declare global {
       backend: string | null;
       source: SourceKey;
       splatCount: number;
+      sourceSplatCount: number;
+      runtimeCopyCount: number;
       totalSortCount: number;
       performance: FramePerformanceMetrics | null;
       analysisState: 'idle' | 'running' | 'complete' | 'failed';
@@ -127,11 +140,27 @@ const sources: Record<SourceKey, SourceDefinition> = {
     url: '/five-million.sog',
     cameraDirection: new Vector3(1, 0.7, 1),
   },
+  'lion-grid-5m': {
+    name: 'Lion grid · 25 runtime copies · 4,877,475 · SH2',
+    url: '/lion.sog',
+    cameraDirection: new Vector3(0, 0.2, 1),
+    rotation: new Euler(Math.PI, 0, 0),
+    runtimeGrid: { columns: 5, rows: 5 },
+    credit: {
+      author: 'Renaud',
+      authorUrl: 'https://superspl.at/user?id=rohls',
+      source: 'https://superspl.at/scene/56155c3f',
+      license: 'CC BY 4.0',
+      licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
+    },
+  },
 };
 
 const parameters = new URLSearchParams(location.search);
 const requestedSource = parameters.get('source');
-const initialSource: SourceKey = requestedSource === 'sh' || requestedSource === 'stress-5m'
+const initialSource: SourceKey = requestedSource === 'sh'
+  || requestedSource === 'stress-5m'
+  || requestedSource === 'lion-grid-5m'
   ? requestedSource
   : 'no-sh';
 const forceWebGL = parameters.get('backend') === 'webgl';
@@ -150,6 +179,8 @@ const exampleState: Window['__THREE_SOG_EXAMPLE__'] = window.__THREE_SOG_EXAMPLE
   backend: null,
   source: initialSource,
   splatCount: 0,
+  sourceSplatCount: 0,
+  runtimeCopyCount: 0,
   totalSortCount: 0,
   performance: null,
   analysisState: 'idle',
@@ -199,6 +230,8 @@ controls.update();
 
 const loader = new SOGLoader();
 let currentMesh: SOGGaussianSplatMesh | null = null;
+let currentRoot: Group | null = null;
+let currentRenderMeshes: SOGDrawMesh[] = [];
 let currentResource: SOGResource | null = null;
 let currentController: AbortController | null = null;
 let loadGeneration = 0;
@@ -299,7 +332,9 @@ function updateFrameMetrics(timestamp: number, cpuSubmitDurationMs: number): voi
     radixBackend: renderDiagnostics?.radixBackend ?? null,
     radixBits: renderDiagnostics?.radixBits ?? 0,
     radixSelectionReason: renderDiagnostics?.radixSelectionReason ?? null,
-    activeSplatCount: renderDiagnostics?.activeSplatCount ?? 0,
+    activeSplatCount: exampleState.splatCount,
+    sourceSplatCount: exampleState.sourceSplatCount,
+    runtimeCopyCount: exampleState.runtimeCopyCount,
     fps: rounded(1_000 / averageFrameMs),
     averageFrameMs: rounded(averageFrameMs),
     p95FrameMs: rounded(percentile(frameIntervals, 0.95)),
@@ -395,13 +430,29 @@ function setLicense(source: SourceDefinition): void {
   licenseLink.target = '_blank';
   licenseLink.rel = 'noopener';
   licenseLink.textContent = source.credit.license;
-  license.append('Model by ', author, ' · ', original, ' · ', licenseLink, ' · converted to SOG without decimation.');
+  license.append(
+    'Model by ',
+    author,
+    ' · ',
+    original,
+    ' · ',
+    licenseLink,
+    source.runtimeGrid
+      ? ` · one full SOG download, instanced ${source.runtimeGrid.columns * source.runtimeGrid.rows} times at runtime.`
+      : ' · converted to SOG without decimation.',
+  );
 }
 
-function fitCamera(mesh: SOGGaussianSplatMesh, source: SourceDefinition): void {
-  mesh.updateWorldMatrix(true, false);
-  const sphere = mesh.geometry.boundingSphere?.clone().applyMatrix4(mesh.matrixWorld);
-  if (!sphere) return;
+function fitCamera(
+  root: Group,
+  source: SourceDefinition,
+  renderMeshes: readonly SOGDrawMesh[],
+): void {
+  root.updateWorldMatrix(true, true);
+  const onlyMesh = renderMeshes.length === 1 ? renderMeshes[0] : undefined;
+  const sphere = onlyMesh?.geometry.boundingSphere
+    ? onlyMesh.geometry.boundingSphere.clone().applyMatrix4(onlyMesh.matrixWorld)
+    : new Box3().setFromObject(root).getBoundingSphere(new Sphere());
   const radius = Math.max(sphere.radius, 0.01);
   const distance = radius / Math.sin(MathUtils.degToRad(camera.fov) * 0.5);
   controls.minDistance = radius * 0.25;
@@ -412,6 +463,49 @@ function fitCamera(mesh: SOGGaussianSplatMesh, source: SourceDefinition): void {
   camera.far = Math.max(distance * 10, 10);
   camera.updateProjectionMatrix();
   controls.update();
+}
+
+function createRuntimeComposition(
+  mesh: SOGGaussianSplatMesh,
+  source: SourceDefinition,
+): { root: Group; renderMeshes: SOGDrawMesh[]; totalSplatCount: number } {
+  const root = new Group();
+  root.name = `${source.name} root`;
+  if (source.rotation) root.rotation.copy(source.rotation);
+  if (source.scale) root.scale.setScalar(source.scale);
+  const grid = source.runtimeGrid;
+  if (!grid) {
+    root.add(mesh);
+    return { root, renderMeshes: [mesh], totalSplatCount: mesh.resource.count };
+  }
+
+  const size = mesh.geometry.boundingBox?.getSize(new Vector3()) ?? new Vector3(1, 1, 1);
+  const spacingX = Math.max(size.x * 1.18, 0.01);
+  const spacingY = Math.max(size.y * 1.14, 0.01);
+  const renderMeshes: SOGDrawMesh[] = [];
+  for (let row = 0; row < grid.rows; row += 1) {
+    for (let column = 0; column < grid.columns; column += 1) {
+      const copyIndex = row * grid.columns + column;
+      const copy = copyIndex === 0
+        ? mesh
+        : new Mesh(mesh.geometry.clone(), mesh.material);
+      copy.name = `Lion runtime copy ${copyIndex + 1}`;
+      copy.position.set(
+        (column - (grid.columns - 1) * 0.5) * spacingX,
+        (row - (grid.rows - 1) * 0.5) * spacingY,
+        0,
+      );
+      copy.frustumCulled = mesh.frustumCulled;
+      copy.renderOrder = copyIndex === 0 ? 1 : 2;
+      root.add(copy);
+      renderMeshes.push(copy);
+    }
+  }
+  return {
+    root,
+    renderMeshes,
+    totalSplatCount: mesh.resource.count * renderMeshes.length,
+  };
 }
 
 interface AnalysisScenarioDefinition {
@@ -489,25 +583,34 @@ async function measureAnalysisFrame(): Promise<AnalysisFrameProbe> {
 }
 
 function configureAnalysisScenario(
-  mesh: SOGGaussianSplatMesh,
+  renderMeshes: readonly SOGDrawMesh[],
+  root: Group,
+  sourceSplatCount: number,
   definition: AnalysisScenarioDefinition,
   originalScale: Vector3,
 ): void {
   renderer.setPixelRatio(definition.pixelRatio);
   renderer.setSize(innerWidth, innerHeight);
-  mesh.geometry.instanceCount = definition.instanceCount;
-  mesh.scale.copy(originalScale).multiplyScalar(definition.modelScale);
-  mesh.visible = definition.visible;
-  mesh.updateMatrixWorld(true);
+  let remaining = definition.instanceCount;
+  for (const renderMesh of renderMeshes) {
+    const instanceCount = Math.min(sourceSplatCount, Math.max(0, remaining));
+    renderMesh.geometry.instanceCount = instanceCount;
+    renderMesh.visible = definition.visible && instanceCount > 0;
+    remaining -= instanceCount;
+  }
+  root.scale.copy(originalScale).multiplyScalar(definition.modelScale);
+  root.updateWorldMatrix(true, true);
 }
 
 async function measureAnalysisScenario(
-  mesh: SOGGaussianSplatMesh,
+  renderMeshes: readonly SOGDrawMesh[],
+  root: Group,
+  sourceSplatCount: number,
   definition: AnalysisScenarioDefinition,
   originalScale: Vector3,
   sampleCount: number,
 ): Promise<BottleneckScenario> {
-  configureAnalysisScenario(mesh, definition, originalScale);
+  configureAnalysisScenario(renderMeshes, root, sourceSplatCount, definition, originalScale);
   await measureAnalysisFrame();
   const probes: AnalysisFrameProbe[] = [];
   for (let sample = 0; sample < sampleCount; sample += 1) {
@@ -544,12 +647,14 @@ async function measureAnalysisScenario(
 }
 
 async function measureCameraSort(
-  mesh: SOGGaussianSplatMesh,
+  renderMeshes: readonly SOGDrawMesh[],
+  root: Group,
+  sourceSplatCount: number,
   originalScale: Vector3,
   originalPixelRatio: number,
   sampleCount: number,
 ): Promise<BottleneckSortMeasurement | null> {
-  configureAnalysisScenario(mesh, {
+  configureAnalysisScenario(renderMeshes, root, sourceSplatCount, {
     id: 'sort',
     label: 'Camera-change radix sort',
     instanceCount: 1,
@@ -650,21 +755,25 @@ function buildAnalysisScenarios(
 
 async function executeBottleneckAnalysis(): Promise<BottleneckAnalysis> {
   const mesh = currentMesh;
-  if (!mesh || exampleState.state !== 'ready') {
+  const root = currentRoot;
+  const renderMeshes = [...currentRenderMeshes];
+  if (!mesh || !root || renderMeshes.length === 0 || exampleState.state !== 'ready') {
     throw new Error('Wait for a SOG scene to finish loading before running the analysis.');
   }
   const startedAtMs = performance.now();
   const startedAt = new Date().toISOString();
   const originalPixelRatio = renderer.getPixelRatio();
-  const originalScale = mesh.scale.clone();
-  const originalInstanceCount = mesh.geometry.instanceCount;
-  const originalVisible = mesh.visible;
+  const originalScale = root.scale.clone();
+  const originalMeshStates = renderMeshes.map((renderMesh) => ({
+    instanceCount: renderMesh.geometry.instanceCount,
+    visible: renderMesh.visible,
+  }));
   const originalCameraPosition = camera.position.clone();
   const originalCameraQuaternion = camera.quaternion.clone();
   const originalCameraScale = camera.scale.clone();
   const originalTarget = controls.target.clone();
   const originalMotion = exampleState.motion;
-  const definitions = buildAnalysisScenarios(mesh.resource.count, originalPixelRatio);
+  const definitions = buildAnalysisScenarios(exampleState.splatCount, originalPixelRatio);
   const totalStages = definitions.length + 1;
   exampleState.analysisState = 'running';
   exampleState.analysisProgress = null;
@@ -681,17 +790,33 @@ async function executeBottleneckAnalysis(): Promise<BottleneckAnalysis> {
     for (let index = 0; index < definitions.length; index += 1) {
       const definition = definitions[index]!;
       setAnalysisProgress(index, totalStages, definition.label);
-      scenarios.push(await measureAnalysisScenario(mesh, definition, originalScale, 5));
+      scenarios.push(await measureAnalysisScenario(
+        renderMeshes,
+        root,
+        mesh.resource.count,
+        definition,
+        originalScale,
+        5,
+      ));
     }
     setAnalysisProgress(definitions.length, totalStages, 'Camera-change radix sort');
-    const sort = await measureCameraSort(mesh, originalScale, originalPixelRatio, 3);
+    const sort = await measureCameraSort(
+      renderMeshes,
+      root,
+      mesh.resource.count,
+      originalScale,
+      originalPixelRatio,
+      3,
+    );
     const derived = deriveBottleneckFindings(scenarios, sort);
     const fullScenario = scenarios.find((scenario) => scenario.id === 'full');
     const completedAt = new Date().toISOString();
     const report: BottleneckAnalysis = {
       source: exampleState.source,
       backend: mesh.diagnostics.backend,
-      splatCount: mesh.resource.count,
+      splatCount: exampleState.splatCount,
+      sourceSplatCount: mesh.resource.count,
+      runtimeCopyCount: renderMeshes.length,
       timestampSupported: gpuTimestampSupported,
       startedAt,
       completedAt,
@@ -710,7 +835,7 @@ async function executeBottleneckAnalysis(): Promise<BottleneckAnalysis> {
         'Half DPR retains all instances and shader work while reducing drawing-buffer pixels to one quarter.',
         'Quarter DPR retains all instances and shader work while reducing drawing-buffer pixels to one sixteenth.',
         'Quarter model scale retains all instances and vertex work while reducing projected splat footprint.',
-        'The sort probe renders one instance but sorts the complete source, isolating camera-change compute from normal drawing.',
+        `The sort probe renders one instance and sorts the shared ${mesh.resource.count.toLocaleString()}-splat source payload, isolating camera-change compute from normal drawing.`,
         ...(fullScenario && mesh.material.transparent && mesh.material.side === DoubleSide
           ? [`Transparent DoubleSide rendering produced ${fullScenario.drawCalls.toLocaleString()} draw calls and ${fullScenario.triangles.toLocaleString()} triangles in the full probe, approximately twice the splat geometry's single-sided triangle count.`]
           : []),
@@ -733,13 +858,21 @@ async function executeBottleneckAnalysis(): Promise<BottleneckAnalysis> {
     updateDiagnosticsView();
     throw error;
   } finally {
-    if (!disposed && currentMesh === mesh && mesh.state === 'ready') {
+    if (
+      !disposed
+      && currentMesh === mesh
+      && currentRoot === root
+      && mesh.state === 'ready'
+    ) {
       renderer.setPixelRatio(originalPixelRatio);
       renderer.setSize(innerWidth, innerHeight);
-      mesh.geometry.instanceCount = originalInstanceCount;
-      mesh.scale.copy(originalScale);
-      mesh.visible = originalVisible;
-      mesh.updateMatrixWorld(true);
+      for (let index = 0; index < renderMeshes.length; index += 1) {
+        const state = originalMeshStates[index]!;
+        renderMeshes[index]!.geometry.instanceCount = state.instanceCount;
+        renderMeshes[index]!.visible = state.visible;
+      }
+      root.scale.copy(originalScale);
+      root.updateWorldMatrix(true, true);
       camera.position.copy(originalCameraPosition);
       camera.quaternion.copy(originalCameraQuaternion);
       camera.scale.copy(originalCameraScale);
@@ -770,15 +903,19 @@ analysisButton.addEventListener('click', () => {
 });
 
 function disposeSelection(): void {
-  if (currentMesh) scene.remove(currentMesh);
+  if (currentRoot) scene.remove(currentRoot);
+  for (const renderMesh of currentRenderMeshes.slice(1)) renderMesh.geometry.dispose();
+  currentRoot?.clear();
   currentMesh?.dispose();
   currentResource?.dispose();
   currentMesh = null;
+  currentRoot = null;
+  currentRenderMeshes = [];
   currentResource = null;
 }
 
 async function loadSource(key: SourceKey): Promise<void> {
-  if (key === 'stress-5m' && forceWebGL) {
+  if ((key === 'stress-5m' || key === 'lion-grid-5m') && forceWebGL) {
     status.textContent = 'The 5M stress scene requires WebGPU; switching backend…';
     const next = new URL(location.href);
     next.searchParams.set('source', key);
@@ -793,6 +930,8 @@ async function loadSource(key: SourceKey): Promise<void> {
   const source = sources[key];
   exampleState.state = 'loading';
   exampleState.source = key;
+  exampleState.sourceSplatCount = 0;
+  exampleState.runtimeCopyCount = 0;
   exampleState.error = null;
   exampleState.analysisState = 'idle';
   exampleState.analysisProgress = null;
@@ -815,8 +954,6 @@ async function loadSource(key: SourceKey): Promise<void> {
       },
     });
     mesh = new SOGGaussianSplatMesh(resource);
-    if (source.rotation) mesh.rotation.copy(source.rotation);
-    if (source.scale) mesh.scale.setScalar(source.scale);
     exampleState.state = 'preparing';
     status.textContent = `Preparing ${source.name}…`;
     await mesh.prepare(renderer, { signal: controller.signal });
@@ -826,15 +963,20 @@ async function loadSource(key: SourceKey): Promise<void> {
       return;
     }
 
+    const composition = createRuntimeComposition(mesh, source);
     disposeSelection();
     currentMesh = mesh;
+    currentRoot = composition.root;
+    currentRenderMeshes = composition.renderMeshes;
     currentResource = resource;
-    scene.add(mesh);
-    fitCamera(mesh, source);
+    scene.add(composition.root);
+    fitCamera(composition.root, source, composition.renderMeshes);
     exampleState.state = 'ready';
     exampleState.backend = mesh.diagnostics.backend;
-    exampleState.splatCount = resource.count;
-    status.textContent = `${source.name} · ${resource.count.toLocaleString()} splats · ${mesh.diagnostics.backend}`;
+    exampleState.splatCount = composition.totalSplatCount;
+    exampleState.sourceSplatCount = resource.count;
+    exampleState.runtimeCopyCount = composition.renderMeshes.length;
+    status.textContent = `${source.name} · ${composition.totalSplatCount.toLocaleString()} splats · ${mesh.diagnostics.backend}`;
     analysisButton.disabled = false;
     resetFrameMetrics();
   } catch (error) {

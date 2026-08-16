@@ -124,8 +124,8 @@ streaming boundaries.
 
 Run `npm run example`, then open
 `http://127.0.0.1:4173/webgpu_sog.html`. The public example follows the Three.js
-Gaussian Splatting example structure. Its source control contains only real
-models: the full 116,374-Gaussian Millipede for no-SH and the full
+Gaussian Splatting example structure. Its real-model choices include the full
+116,374-Gaussian Millipede for no-SH and the full
 195,099-Gaussian Lion SH2 model from the Three.js example. Both are converted
 without decimation or filtering, and Lion retains every SH band. The backend
 control reloads with either WebGPU or forced WebGL.
@@ -136,6 +136,10 @@ backend-specific sort timing. See [example notes](./examples/README.md).
 The source selector also includes a reproducible synthetic 5,000,000-splat
 WebGPU stress scene. It uses about 200 MB of reported GPU resources on the
 Portable path and automatically switches away from forced WebGL.
+For a real-data comparison, Lion grid downloads the same 3.3 MB Lion SOG once
+and shares its prepared textures, SH palette, material, and order buffer across
+25 translated runtime draw instances (4,877,475 logical splats). No expanded
+25-copy fixture is stored or uploaded.
 
 ## Development
 
