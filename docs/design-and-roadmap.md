@@ -57,13 +57,13 @@ The relevant upstream architecture is:
 | Native SOG GPU resource | [`gsplat-sog-data.js`](https://github.com/playcanvas/engine/blob/070709b0256e6bd2484e4c21e908a1b6b9fc73b9/src/scene/gsplat/gsplat-sog-data.js), [`gsplat-sog-resource.js`](https://github.com/playcanvas/engine/blob/070709b0256e6bd2484e4c21e908a1b6b9fc73b9/src/scene/gsplat/gsplat-sog-resource.js) | Keep `means_l`, `means_u`, quaternions, scales, SH data, and the v2 codebook in their native GPU representation. Generate CPU centers only for a CPU-sort backend. |
 | Canonical active work buffer | [`gsplat-work-buffer.js`](https://github.com/playcanvas/engine/blob/070709b0256e6bd2484e4c21e908a1b6b9fc73b9/src/scene/gsplat-unified/gsplat-work-buffer.js), [`gsplat-work-buffer-render-pass.js`](https://github.com/playcanvas/engine/blob/070709b0256e6bd2484e4c21e908a1b6b9fc73b9/src/scene/gsplat-unified/gsplat-work-buffer-render-pass.js) | Decode or copy active source ranges into one renderer-owned layout only when resource, transform, or active-range state changes. Keep sort order in a WebGPU storage buffer; use a texture only for the WebGL backend. |
 | WebGPU cull, project, and key generation | [`gsplat-hybrid-renderer.js`](https://github.com/playcanvas/engine/blob/070709b0256e6bd2484e4c21e908a1b6b9fc73b9/src/scene/gsplat-unified/gsplat-hybrid-renderer.js), [`gsplat-projector.js`](https://github.com/playcanvas/engine/blob/070709b0256e6bd2484e4c21e908a1b6b9fc73b9/src/scene/gsplat-unified/gsplat-projector.js) | Follow the GPU-driven sequence: interval cull and compaction, projection and screen-space culling, depth-key generation, global sort, then indirect drawing. Do not read centers or sort keys back to the CPU. |
-| WebGPU radix sort | [`compute-radix-sort.js`](https://github.com/playcanvas/engine/blob/070709b0256e6bd2484e4c21e908a1b6b9fc73b9/src/scene/graphics/radix-sort/compute-radix-sort.js), [`compute-radix-sort-multipass.js`](https://github.com/playcanvas/engine/blob/070709b0256e6bd2484e4c21e908a1b6b9fc73b9/src/scene/graphics/radix-sort/compute-radix-sort-multipass.js), [`compute-radix-sort-onesweep.js`](https://github.com/playcanvas/engine/blob/070709b0256e6bd2484e4c21e908a1b6b9fc73b9/src/scene/graphics/radix-sort/compute-radix-sort-onesweep.js) | Start with a portable radix implementation. Treat subgroup/OneSweep paths as later, capability-gated optimizations because upstream currently restricts its automatically selected OneSweep path to validated NVIDIA hardware. |
+| WebGPU global sort | [`compute-radix-sort.js`](https://github.com/playcanvas/engine/blob/070709b0256e6bd2484e4c21e908a1b6b9fc73b9/src/scene/graphics/radix-sort/compute-radix-sort.js), [`compute-radix-sort-multipass.js`](https://github.com/playcanvas/engine/blob/070709b0256e6bd2484e4c21e908a1b6b9fc73b9/src/scene/graphics/radix-sort/compute-radix-sort-multipass.js), [`compute-radix-sort-onesweep.js`](https://github.com/playcanvas/engine/blob/070709b0256e6bd2484e4c21e908a1b6b9fc73b9/src/scene/graphics/radix-sort/compute-radix-sort-onesweep.js) | The MVP uses an original public-TSL 16-bit counting sort so all N-sized stages run across workgroups on r184-r185. Exact hierarchical radix/subgroup paths remain later capability-gated options. |
 | CPU-sort fallback | [`gsplat-manager.js`](https://github.com/playcanvas/engine/blob/070709b0256e6bd2484e4c21e908a1b6b9fc73b9/src/scene/gsplat-unified/gsplat-manager.js), [`gsplat-unified-sorter.js`](https://github.com/playcanvas/engine/blob/070709b0256e6bd2484e4c21e908a1b6b9fc73b9/src/scene/gsplat-unified/gsplat-unified-sorter.js) | Keep only centers in CPU memory, sort asynchronously in a worker, and upload the resulting order. Other Gaussian attributes remain GPU-native. |
 
 The PlayCanvas hybrid renderer is the most important WebGPU reference. Its
 architecture, rather than engine-specific class names or shader plumbing, is
 the target: a GPU-resident active set, GPU-generated visible count and sort
-keys, one global radix sort, and a draw that consumes GPU-produced order data.
+keys, one global GPU sort, and a draw that consumes GPU-produced order data.
 
 ### `potree-engine`: Three.js and WebGL optimization reference
 
@@ -91,7 +91,8 @@ format itself.
 ### How the references are combined
 
 - WebGPU follows the current PlayCanvas GPU-driven architecture and uses
-  storage buffers, compute passes, global radix sorting, and indirect drawing.
+  storage buffers, compute passes, global depth-bucket sorting, and drawing
+  from the GPU-produced order.
 - The WebGL backend follows the centers-only CPU worker model and incorporates
   the measured `potree-engine` upload and prewarm fixes.
 - Both backends share bundle parsing, metadata validation, native SOG resource
@@ -168,7 +169,7 @@ The primary path will:
 1. keep SOG attributes in their compact source representation;
 2. decode positions and other required values with TSL compute work;
 3. generate depth keys on the GPU;
-4. use a GPU radix sort for the complete active splat set;
+4. use a parallel 16-bit GPU counting sort for the complete active splat set;
 5. render the sorted indices with one `SOGGaussianSplatMesh`.
 
 No GPU-to-CPU center readback is required on this path.
@@ -236,7 +237,7 @@ SOGRenderStore
         |
         v
 SOGSortBackend
-  WebGPU radix sort | WebGL worker/CPU sort
+  WebGPU depth-bucket sort | WebGL worker/CPU sort
         |
         v
 SOGGaussianSplatMesh
@@ -356,11 +357,11 @@ required to complete the single-SOG milestone.
 - prewarm required material and compute variants;
 - release temporary archive and decode memory after preparation.
 
-### Step 4: WebGPU rendering and radix sorting
+### Step 4: WebGPU rendering and depth sorting
 
 - implement SOG position, covariance, color, opacity, and SH decoding in TSL;
 - implement depth-key generation;
-- implement and test GPU radix sorting;
+- implement and test parallel GPU depth-bucket sorting;
 - build `SOGGaussianSplatMesh` and its NodeMaterial;
 - integrate camera and object-transform change detection;
 - verify depth interaction with ordinary opaque Three.js meshes.

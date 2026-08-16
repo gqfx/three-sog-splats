@@ -64,8 +64,10 @@ resource.dispose();
 Pass `{ forceWebGL: true }` to `WebGPURenderer` to exercise the fallback. It
 decodes and asynchronously reads back `center.xyz` once per native resource,
 sorts in a transferable worker, and uploads only the instanced order. All other
-attributes remain GPU-native. The WebGPU path generates keys and sorts entirely
-in GPU storage buffers with no center, key, or order readback.
+attributes remain GPU-native. The WebGPU path builds a complete order with a
+parallel 16-bit depth-bucket counting sort in GPU storage buffers, with no
+center, bucket, or order readback. Relative order inside one depth bucket is
+unspecified and protected by monotonic-order and visual regression tests.
 
 Equivalent in-flight loads from one `SOGLoader` are deduplicated. Each caller
 receives an independent resource lease; cancelling one caller does not abort
@@ -121,7 +123,11 @@ Run `npm run example`, then open
 `http://127.0.0.1:4173/webgpu_sog.html`. The public example follows the Three.js
 Gaussian Splatting example structure and loads the full Millipede SOG by
 default. Its controls switch the SOG source and reload the page with either the
-WebGPU or forced WebGL backend. See [example notes](./examples/README.md).
+WebGPU or forced WebGL backend. **Start motion test** and **Stop motion test**
+provide repeatable full-resolution performance sampling without changing the
+active count. The overlay and structured state report frame percentiles, sort
+rate/count, viewport, DPR, and backend-specific sort timing. See
+[example notes](./examples/README.md).
 
 ## Development
 

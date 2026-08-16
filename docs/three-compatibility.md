@@ -17,7 +17,7 @@ The package integrates directly with public `three`, `three/webgpu`, and
 | r167 | Introduced the separately consumable WebGPU/TSL build used through `three/webgpu` | Necessary foundation, but insufficient |
 | r180 | Exposes `floatBitsToUint`, used to generate sortable IEEE-754 depth keys without GPU readback | Necessary for the WebGPU sorter, but insufficient |
 | r183 | Exposes explicit render-target initialization used by the WebGL preparation readback | Rendering starts, but deterministic storage-buffer disposal and program-memory diagnostics are absent |
-| r184 | `BufferAttribute.dispose()` is public for `WebGPURenderer`, and renderer memory reports programs | First release satisfying rendering, diagnostics, and deterministic cleanup |
+| r184 | Public TSL storage atomics plus `BufferAttribute.dispose()` and renderer program-memory diagnostics | First release satisfying parallel sorting, rendering, diagnostics, and deterministic cleanup |
 | r185 | Current pinned development version | Fully accepted |
 
 Primary sources:
@@ -30,12 +30,14 @@ Primary sources:
 
 ## Runtime verification
 
-The same seven Playwright cases were run against the official r184 and r185 npm
+The same nine Playwright cases were run against the official r184 and r185 npm
 artifacts in Headless Chrome with WebGPU enabled. Both runs passed:
 
 - synthetic no-SH and SH SOG rendering on WebGPU;
 - synthetic no-SH and SH rendering on the forced WebGL backend;
 - the full-resolution 116,374-Gaussian Three.js Millipede SOG on both backends;
+- the public example's stationary suppression, deterministic motion/recovery,
+  backend switching, and structured telemetry on both backends;
 - known-value WebP data decoding.
 
 The r183 audit was intentionally treated as a negative boundary test. The scene

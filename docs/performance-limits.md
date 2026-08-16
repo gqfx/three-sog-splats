@@ -2,11 +2,12 @@
 
 ## Guardrail
 
-The loader rejects resources above 2,000,000 splats. Capacity-based WebGPU sort
-buffers round this count to 2,097,152 elements. The public planning constant is
-52 GPU bytes per splat, or 104,000,000 bytes at the limit. This deliberately
+The loader rejects resources above 2,000,000 splats. The WebGPU sorter uses
+exact-size bucket and order buffers plus two fixed 65,536-entry tables, totaling
+16,524,288 bytes at that limit. The public planning constant remains 52 GPU
+bytes per splat, or 104,000,000 bytes at the limit. This deliberately
 overestimates the current compact no-SH layout and leaves room for the SH label,
-order, scratch, and alignment costs.
+sort storage, and alignment costs.
 
 The limit does not reserve memory. Decoded browser images, framebuffer targets,
 Three.js renderer state, driver allocations, and other scene content add to the
@@ -33,6 +34,33 @@ sustained 60 FPS on the full fixture; its Worker sort took about 6.9 ms. These
 numbers are the before-optimization reference for the acceptance measurements
 below, not general hardware guarantees.
 
+### Parallel-sort acceptance result
+
+The optimized path maps ordered IEEE-754 camera depth to 65,536 buckets. GPU
+workgroups reset the tables, decode centers and atomically build the histogram,
+and scatter the complete order. Only the exclusive prefix over the fixed table
+is serial. Source textures, buckets, and order remain GPU-resident during normal
+rendering; the implementation does not reduce the active set.
+
+The same full fixture was measured after the change in the same Codex in-app
+browser environment:
+
+| Backend / state | FPS | Frame p95 | Sort rate | Latest sort timing |
+| --- | ---: | ---: | ---: | ---: |
+| WebGPU idle | 60.0 | 18.6 ms | 0 sorts/s | 0.0 ms CPU submission |
+| WebGPU sustained orbit, 5.3 s | 60.0 | 18.5 ms | 60 sorts/s | 0.2 ms CPU submission |
+| WebGPU recovered, 3.2 s | 60.0 | 18.5 ms | 0 sorts/s | 0.1 ms CPU submission |
+| forced WebGL idle | 60.0 | 18.7 ms | 0 sorts/s | 6.5 ms Worker execution |
+| forced WebGL sustained orbit, 5.3 s | 60.0 | 17.9 ms | 60 sorts/s | 6.7 ms Worker execution |
+| forced WebGL recovered, 3.2 s | 60.0 | 17.9 ms | 0 sorts/s | 6.7 ms Worker execution |
+
+All WebGPU samples retained 116,374 active splats and zero readbacks. Forced
+WebGL retained its single preparation-time center readback. The complete r184
+and r185 nine-test browser matrices and existing full-fixture snapshots passed.
+Relative order inside one 16-bit depth bucket is unspecified; complete
+permutation, monotonic bucket order, and snapshot tolerances are the acceptance
+criteria for that approximation.
+
 The baseline was recorded on 2026-08-15 using macOS arm64, Node v24.14.0, and
 Headless Chrome 151 with Three.js 0.185.0. The bundled CC0 fixtures contain four
 synthetic splats, so their measurements represent fixed pipeline and loading
@@ -58,8 +86,8 @@ order use 4 MB. The 52-byte native planning estimate is 13 MB, while a simple
 fully expanded SH3 layout (position, quaternion, scale, RGBA, and 45 SH floats)
 is 59 MB, 4.54 times the planning estimate. At the 2,000,000-splat guardrail,
 the planning estimate is 104 MB before the additional allocations listed above.
-At that limit, the capacity-rounded WebGPU radix buffers retain 33,555,456
-bytes of CPU-side typed-array backing in addition to their GPU allocation.
+At that limit, the exact-size WebGPU counting-sort buffers retain 16,524,288
+bytes of typed-array backing in addition to their GPU allocation.
 
 ## Methodology
 
@@ -69,7 +97,14 @@ frame, reads structured diagnostics, and runs the deterministic CPU stress
 case. Results vary with the browser, driver, GPU, thermal state, and local I/O;
 the checked-in baseline is a regression reference, not a cross-device target.
 
-Capacity growth is unit-tested at empty, exact-power-of-two,
-non-power-of-two, and 2,000,000-splat boundaries. Lifecycle tests cover repeated
+For interaction sampling, open `webgpu_sog.html`, leave the full fixture idle,
+then use **Start motion test** for at least five seconds and **Stop motion test**
+for a three-second recovery window. Structured state and the on-page JSON record
+the backend, active count, viewport, DPR, frame distribution, total sort count,
+sort rate, and whether the displayed sort duration is CPU submission or Worker
+execution time.
+
+Exact allocation is unit-tested at empty, full-fixture, and 2,000,000-splat
+boundaries. Lifecycle tests cover repeated
 load/dispose, abort during loading and preparation, renderer/device
 initialization loss, and idempotent cleanup.
