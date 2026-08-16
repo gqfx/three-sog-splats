@@ -33,10 +33,12 @@ import {
 } from './material.js';
 import type { SOGMaterialTextures } from './material.js';
 import { SOGRenderStore } from './SOGRenderStore.js';
+import { SOGWebGPUCache } from './SOGWebGPUCache.js';
 import { GpuRadixSorter } from './sort/GpuRadixSorter.js';
 import { WebGLSortBackend } from './sort/WebGLSortBackend.js';
 
 const now = (): number => globalThis.performance?.now() ?? Date.now();
+const PROJECTED_CACHE_MAX_UNIQUE_SPLATS = 1_000_000;
 
 interface ThreeRendererBackendFlags {
   readonly isWebGPUBackend?: boolean;
@@ -50,6 +52,17 @@ function assertThreeWebGPURenderer(renderer: WebGPURenderer): void {
       'SOGGaussianSplatMesh requires Three.js WebGPURenderer; classic WebGLRenderer is not supported.',
     );
   }
+}
+
+function isTranslationMatrix(matrix: Matrix4): boolean {
+  const expected = new Matrix4().makeTranslation(
+    matrix.elements[12]!,
+    matrix.elements[13]!,
+    matrix.elements[14]!,
+  );
+  return matrix.elements.every((value, index) => (
+    Math.abs(value - expected.elements[index]!) <= 1e-8
+  ));
 }
 
 function createSOGAttributeTexture(image: SOGNativeImage, name: string): Texture {
@@ -108,6 +121,8 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
   #preparePromise: Promise<void> | null = null;
   #prepareController: AbortController | null = null;
   #matrixKey = '';
+  #projectionKey = '';
+  #instanceTransforms: Matrix4[] = [new Matrix4()];
   #firstFrameStartedAt: number | null = null;
   #firstFrameMemory: { textures: number; programs: number } | null = null;
 
@@ -128,9 +143,15 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
       prepareDurationMs: 0,
       uploadDurationMs: 0,
       compileDurationMs: 0,
+      staticDecodeDurationMs: 0,
+      projectionWarmupDurationMs: 0,
       firstVisibleFrameDurationMs: 0,
       sortDurationMs: 0,
       sortCount: 0,
+      projectionRefreshDurationMs: 0,
+      projectionRefreshCount: 0,
+      projectedCacheEnabled: false,
+      instanceTransformCount: 1,
       readbackCount: 0,
       orderUploadCount: 0,
       activeSplatCount: resource.count,
@@ -152,6 +173,35 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
 
   get activeRanges(): readonly SOGActiveRange[] {
     return this.#store ? [this.#store.activeRange] : [];
+  }
+
+  /**
+   * Batches translated copies into one WebGPU draw while retaining one source
+   * payload and one shared source-order sort. Call before prepare().
+   */
+  setInstanceTransforms(transforms: readonly Matrix4[]): this {
+    if (this.#state !== 'unprepared' || this.#preparePromise) {
+      throw new SOGError(
+        'PREPARATION_FAILED',
+        'SOG instance transforms must be configured before prepare().',
+      );
+    }
+    if (transforms.length === 0) {
+      throw new RangeError('SOG instance transforms require at least one matrix.');
+    }
+    if (transforms.some((matrix) => !isTranslationMatrix(matrix))) {
+      throw new RangeError(
+        'Batched SOG instance transforms currently support translations only so all copies can share one depth order.',
+      );
+    }
+    const logicalCount = this.#source.count * transforms.length;
+    if (logicalCount > 5_000_000) {
+      throw new RangeError(`SOG runtime instances exceed the 5,000,000-splat limit (${logicalCount}).`);
+    }
+    this.#instanceTransforms = transforms.map((matrix) => matrix.clone());
+    this.#diagnostics.activeSplatCount = logicalCount;
+    this.#diagnostics.instanceTransformCount = transforms.length;
+    return this;
   }
 
   async prepare(renderer: WebGPURenderer, options: SOGPrepareOptions = {}): Promise<void> {
@@ -254,6 +304,7 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
       };
 
       let gpuSorter: GpuRadixSorter | undefined;
+      let webgpuCache: SOGWebGPUCache | undefined;
       let webglSorter: WebGLSortBackend | undefined;
       if (backend === 'webgpu') {
         gpuSorter = await GpuRadixSorter.create(
@@ -276,7 +327,30 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
         await gpuSorter.sortAsync(renderer);
         this.#diagnostics.sortDurationMs = now() - sortStartedAt;
         this.#diagnostics.sortCount += 1;
+        const shouldCacheProjectedData = this.#instanceTransforms.length > 1
+          || this.#source.count <= PROJECTED_CACHE_MAX_UNIQUE_SPLATS;
+        if (shouldCacheProjectedData) {
+          webgpuCache = new SOGWebGPUCache(
+            materialTextures,
+            this.#source.meta,
+            this.#instanceTransforms,
+          );
+          cleanup.defer(() => webgpuCache?.dispose());
+          const decodeStartedAt = now();
+          await webgpuCache.decodeAsync(renderer);
+          this.#diagnostics.staticDecodeDurationMs = now() - decodeStartedAt;
+          const projectionWarmupStartedAt = now();
+          await webgpuCache.warmProjectionAsync(renderer);
+          this.#diagnostics.projectionWarmupDurationMs = now() - projectionWarmupStartedAt;
+          this.#diagnostics.projectedCacheEnabled = true;
+        }
       } else {
+        if (this.#instanceTransforms.length > 1) {
+          throw new SOGError(
+            'UNSUPPORTED_RENDERER',
+            'Batched SOG instance transforms require the WebGPU backend.',
+          );
+        }
         const centerResult = await getCachedCenters(meansImage, renderer, {
           meansLow,
           meansHigh,
@@ -301,12 +375,26 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
       const orderAttribute = gpuSorter?.orderAttribute ?? webglSorter?.orderAttribute;
       if (!orderAttribute) throw new SOGError('PREPARATION_FAILED', 'No SOG sort order resource was created.');
       const geometry = createSOGGeometry(
-        this.#source.count,
+        this.#source.count * this.#instanceTransforms.length,
         this.#source.bounds,
         backend === 'webgl' ? webglSorter?.orderAttribute : undefined,
         Math.exp(Math.max(...this.#source.meta.scales.codebook.filter(Number.isFinite))),
       );
-      const material = createSOGMaterial(materialTextures, this.#source.meta, orderAttribute, backend);
+      if (this.#instanceTransforms.length > 1 && geometry.boundingBox) {
+        const sourceBounds = geometry.boundingBox.clone();
+        geometry.boundingBox.makeEmpty();
+        for (const transform of this.#instanceTransforms) {
+          geometry.boundingBox.union(sourceBounds.clone().applyMatrix4(transform));
+        }
+        geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(geometry.boundingSphere!);
+      }
+      const material = createSOGMaterial(
+        materialTextures,
+        this.#source.meta,
+        orderAttribute,
+        backend,
+        webgpuCache?.projected,
+      );
       cleanup.defer(() => geometry.dispose());
       cleanup.defer(() => material.dispose());
       store = new SOGRenderStore({
@@ -316,8 +404,9 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
         geometry,
         material,
         ...(gpuSorter ? { gpuSorter } : {}),
+        ...(webgpuCache ? { webgpuCache } : {}),
         ...(webglSorter ? { webglSorter } : {}),
-        count: this.#source.count,
+        count: this.#source.count * this.#instanceTransforms.length,
         matrix: this.matrixWorld,
       });
       cleanup.release();
@@ -326,6 +415,7 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
         0,
       );
       this.#diagnostics.allocatedGpuBytes = (gpuSorter?.allocatedBytes ?? webglSorter?.gpuAllocatedBytes ?? 0)
+        + (webgpuCache?.allocatedBytes ?? 0)
         + nativeTextureBytes
         + (256 * 4 * 4);
       this.#diagnostics.allocatedCpuBytes = webglSorter?.cpuAllocatedBytes ?? 0;
@@ -357,7 +447,7 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
             programs: renderer.info.memory.programs,
           };
         }
-        this.#updateSort(camera);
+        this.#updateForCamera(camera);
       };
       this.onAfterRender = () => {
         if (this.#firstFrameStartedAt !== null && this.#diagnostics.firstVisibleFrameDurationMs === 0) {
@@ -405,23 +495,40 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
     }
   }
 
-  #updateSort(camera: Camera): void {
+  #updateForCamera(camera: Camera): void {
     const renderer = this.#renderer;
     const store = this.#store;
     if (!renderer || !store || this.#state !== 'ready') return;
     this.updateMatrixWorld();
     const view = new Matrix4().multiplyMatrices(camera.matrixWorldInverse, this.matrixWorld);
-    const key = `${this.#source.version}|${view.elements.map((value) => value.toFixed(7)).join(',')}`;
-    if (key === this.#matrixKey) return;
-    this.#matrixKey = key;
-    if (store.gpuSorter) {
-      store.gpuSorter.updateViewMatrix(view);
-      const startedAt = now();
-      store.gpuSorter.sort(renderer);
-      this.#diagnostics.sortDurationMs = now() - startedAt;
-      this.#diagnostics.sortCount += 1;
-    } else {
-      store.webglSorter?.update(view);
+    const viewKey = `${this.#source.version}|${view.elements.map((value) => value.toFixed(7)).join(',')}`;
+    if (viewKey !== this.#matrixKey) {
+      this.#matrixKey = viewKey;
+      if (store.gpuSorter) {
+        store.gpuSorter.updateViewMatrix(view);
+        const startedAt = now();
+        store.gpuSorter.sort(renderer);
+        this.#diagnostics.sortDurationMs = now() - startedAt;
+        this.#diagnostics.sortCount += 1;
+      } else {
+        store.webglSorter?.update(view);
+      }
+    }
+    if (store.webgpuCache) {
+      const projectionKey = `${viewKey}|${camera.projectionMatrix.elements
+        .map((value) => value.toFixed(7)).join(',')}`;
+      if (projectionKey !== this.#projectionKey) {
+        this.#projectionKey = projectionKey;
+        const localCameraPosition = new Vector3()
+          .setFromMatrixPosition(camera.matrixWorld)
+          .applyMatrix4(this.matrixWorld.clone().invert());
+        const viewProjectionModel = new Matrix4().multiplyMatrices(camera.projectionMatrix, view);
+        store.webgpuCache.updateCamera(viewProjectionModel, localCameraPosition);
+        const startedAt = now();
+        store.webgpuCache.project(renderer);
+        this.#diagnostics.projectionRefreshDurationMs = now() - startedAt;
+        this.#diagnostics.projectionRefreshCount += 1;
+      }
     }
   }
 }

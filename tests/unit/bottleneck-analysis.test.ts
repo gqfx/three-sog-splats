@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   deriveBottleneckFindings,
   type BottleneckScenario,
-  type BottleneckSortMeasurement,
+  type BottleneckCameraUpdateMeasurement,
 } from '../../examples/bottleneck-analysis.js';
 
 function probe(
@@ -39,7 +39,7 @@ describe('deriveBottleneckFindings', () => {
     ];
     const result = deriveBottleneckFindings(scenarios, null);
 
-    expect(result.findings[0]?.stage).toBe('per-instance-vertex-and-attribute-decode');
+    expect(result.findings[0]?.stage).toBe('cached-screen-space-fetch');
     expect(result.findings[0]?.impactMs).toBe(163.6);
     expect(result.summary).toContain('Primary stationary bottleneck');
   });
@@ -58,26 +58,27 @@ describe('deriveBottleneckFindings', () => {
   });
 
   it('keeps radix sorting conditional on camera movement', () => {
-    const sort: BottleneckSortMeasurement = {
+    const cameraUpdate: BottleneckCameraUpdateMeasurement = {
       sampleCount: 3,
       gpuComputeMedianMs: 90,
       gpuComputeP95Ms: 100,
       cpuSubmitMedianMs: 0.2,
       computePasses: 32,
+      includesProjectionRefresh: true,
     };
     const result = deriveBottleneckFindings([
       probe('empty', 0.4),
       probe('full', 20),
       probe('half-resolution', 18),
       probe('quarter-scale', 17),
-    ], sort);
+    ], cameraUpdate);
 
     expect(result.findings[0]).toMatchObject({
-      stage: 'radix-sort-while-moving',
+      stage: 'camera-change-sort-and-projection',
       conditional: true,
       impactMs: 90,
     });
-    expect(result.summary).toContain('Camera motion additionally runs radix sort');
+    expect(result.summary).toContain('Camera motion additionally refreshes sort/projection caches');
   });
 
   it('falls back to completion latency when the empty-pass timestamp is invalid', () => {

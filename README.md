@@ -88,8 +88,9 @@ the application has replaced or recovered its renderer.
 - `SOGResource` exposes immutable metadata, bounds, native images, SH bands,
   load diagnostics, cloning, and idempotent disposal.
 - `SOGGaussianSplatMesh` is a normal Three.js mesh with explicit asynchronous
-  `prepare()`, scene transforms, one full-resource active range, render
-  diagnostics, and idempotent disposal.
+  `prepare()`, scene transforms, optional pre-prepare translated batching via
+  `setInstanceTransforms()`, one full-resource active range, render diagnostics,
+  and idempotent disposal.
 - `SOGError` provides stable codes such as `ABORTED`, `INVALID_ARCHIVE`,
   `INVALID_METADATA`, `UNSUPPORTED_RENDERER`, and `RENDERER_MISMATCH`.
 - Exported option, state, metadata, bounds, diagnostics, and disposal types are
@@ -137,9 +138,10 @@ The source selector also includes a reproducible synthetic 5,000,000-splat
 WebGPU stress scene. It uses about 200 MB of reported GPU resources on the
 Portable path and automatically switches away from forced WebGL.
 For a real-data comparison, Lion grid downloads the same 3.3 MB Lion SOG once
-and shares its prepared textures, SH palette, material, and order buffer across
-25 translated runtime draw instances (4,877,475 logical splats). No expanded
-25-copy fixture is stored or uploaded.
+and batches 25 translated runtime copies into one draw (4,877,475 logical
+splats). One-time static dequantization and camera-change projection/SH caches
+replace per-frame texture decode; stationary frames run no compute. No expanded
+25-copy source fixture is stored or uploaded.
 
 ## Development
 

@@ -5,7 +5,7 @@ import {
   Euler,
   Group,
   MathUtils,
-  Mesh,
+  Matrix4,
   PerspectiveCamera,
   Scene,
   Sphere,
@@ -13,14 +13,15 @@ import {
   Vector3,
   WebGPURenderer,
 } from 'three/webgpu';
+import type { Mesh } from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SOGGaussianSplatMesh, SOGLoader } from '../src/index.js';
 import type { SOGResource } from '../src/index.js';
 import {
   deriveBottleneckFindings,
   type BottleneckAnalysis,
+  type BottleneckCameraUpdateMeasurement,
   type BottleneckScenario,
-  type BottleneckSortMeasurement,
 } from './bottleneck-analysis.js';
 
 type SourceKey = 'no-sh' | 'sh' | 'stress-5m' | 'lion-grid-5m';
@@ -46,6 +47,11 @@ interface FramePerformanceMetrics {
   readonly sortsPerSecond: number;
   readonly sortDurationMs: number;
   readonly sortDurationKind: 'cpu-command-submission' | 'worker-execution' | null;
+  readonly staticDecodeDurationMs: number;
+  readonly projectionWarmupDurationMs: number;
+  readonly projectionRefreshDurationMs: number;
+  readonly projectionRefreshCount: number;
+  readonly projectedCacheEnabled: boolean;
   readonly gpuTimestampSupported: boolean;
   readonly latestGpuRenderMs: number | null;
   readonly latestGpuComputeMs: number | null;
@@ -351,6 +357,11 @@ function updateFrameMetrics(timestamp: number, cpuSubmitDurationMs: number): voi
       : renderDiagnostics?.backend === 'webgl'
         ? 'worker-execution'
         : null,
+    staticDecodeDurationMs: rounded(renderDiagnostics?.staticDecodeDurationMs ?? 0),
+    projectionWarmupDurationMs: rounded(renderDiagnostics?.projectionWarmupDurationMs ?? 0),
+    projectionRefreshDurationMs: rounded(renderDiagnostics?.projectionRefreshDurationMs ?? 0),
+    projectionRefreshCount: renderDiagnostics?.projectionRefreshCount ?? 0,
+    projectedCacheEnabled: renderDiagnostics?.projectedCacheEnabled ?? false,
     gpuTimestampSupported,
     latestGpuRenderMs: latestTimestampSample?.renderMs ?? null,
     latestGpuComputeMs: latestTimestampSample?.computeMs ?? null,
@@ -468,7 +479,12 @@ function fitCamera(
 function createRuntimeComposition(
   mesh: SOGGaussianSplatMesh,
   source: SourceDefinition,
-): { root: Group; renderMeshes: SOGDrawMesh[]; totalSplatCount: number } {
+): {
+  root: Group;
+  renderMeshes: SOGDrawMesh[];
+  totalSplatCount: number;
+  runtimeCopyCount: number;
+} {
   const root = new Group();
   root.name = `${source.name} root`;
   if (source.rotation) root.rotation.copy(source.rotation);
@@ -476,36 +492,48 @@ function createRuntimeComposition(
   const grid = source.runtimeGrid;
   if (!grid) {
     root.add(mesh);
-    return { root, renderMeshes: [mesh], totalSplatCount: mesh.resource.count };
+    return {
+      root,
+      renderMeshes: [mesh],
+      totalSplatCount: mesh.resource.count,
+      runtimeCopyCount: 1,
+    };
   }
+  root.add(mesh);
+  const runtimeCopyCount = grid.columns * grid.rows;
+  return {
+    root,
+    renderMeshes: [mesh],
+    totalSplatCount: mesh.resource.count * runtimeCopyCount,
+    runtimeCopyCount,
+  };
+}
 
-  const size = mesh.geometry.boundingBox?.getSize(new Vector3()) ?? new Vector3(1, 1, 1);
+function createRuntimeInstanceTransforms(
+  resource: SOGResource,
+  source: SourceDefinition,
+): Matrix4[] {
+  const grid = source.runtimeGrid;
+  if (!grid) return [new Matrix4()];
+  const maxScale = Math.exp(Math.max(...resource.meta.scales.codebook.filter(Number.isFinite)));
+  const coverageRadius = maxScale * 2;
+  const size = new Box3(
+    new Vector3(...resource.bounds.min).addScalar(-coverageRadius),
+    new Vector3(...resource.bounds.max).addScalar(coverageRadius),
+  ).getSize(new Vector3());
   const spacingX = Math.max(size.x * 1.18, 0.01);
   const spacingY = Math.max(size.y * 1.14, 0.01);
-  const renderMeshes: SOGDrawMesh[] = [];
+  const transforms: Matrix4[] = [];
   for (let row = 0; row < grid.rows; row += 1) {
     for (let column = 0; column < grid.columns; column += 1) {
-      const copyIndex = row * grid.columns + column;
-      const copy = copyIndex === 0
-        ? mesh
-        : new Mesh(mesh.geometry.clone(), mesh.material);
-      copy.name = `Lion runtime copy ${copyIndex + 1}`;
-      copy.position.set(
+      transforms.push(new Matrix4().makeTranslation(
         (column - (grid.columns - 1) * 0.5) * spacingX,
         (row - (grid.rows - 1) * 0.5) * spacingY,
         0,
-      );
-      copy.frustumCulled = mesh.frustumCulled;
-      copy.renderOrder = copyIndex === 0 ? 1 : 2;
-      root.add(copy);
-      renderMeshes.push(copy);
+      ));
     }
   }
-  return {
-    root,
-    renderMeshes,
-    totalSplatCount: mesh.resource.count * renderMeshes.length,
-  };
+  return transforms;
 }
 
 interface AnalysisScenarioDefinition {
@@ -585,7 +613,7 @@ async function measureAnalysisFrame(): Promise<AnalysisFrameProbe> {
 function configureAnalysisScenario(
   renderMeshes: readonly SOGDrawMesh[],
   root: Group,
-  sourceSplatCount: number,
+  logicalSplatCount: number,
   definition: AnalysisScenarioDefinition,
   originalScale: Vector3,
 ): void {
@@ -593,7 +621,7 @@ function configureAnalysisScenario(
   renderer.setSize(innerWidth, innerHeight);
   let remaining = definition.instanceCount;
   for (const renderMesh of renderMeshes) {
-    const instanceCount = Math.min(sourceSplatCount, Math.max(0, remaining));
+    const instanceCount = Math.min(logicalSplatCount, Math.max(0, remaining));
     renderMesh.geometry.instanceCount = instanceCount;
     renderMesh.visible = definition.visible && instanceCount > 0;
     remaining -= instanceCount;
@@ -605,12 +633,12 @@ function configureAnalysisScenario(
 async function measureAnalysisScenario(
   renderMeshes: readonly SOGDrawMesh[],
   root: Group,
-  sourceSplatCount: number,
+  logicalSplatCount: number,
   definition: AnalysisScenarioDefinition,
   originalScale: Vector3,
   sampleCount: number,
 ): Promise<BottleneckScenario> {
-  configureAnalysisScenario(renderMeshes, root, sourceSplatCount, definition, originalScale);
+  configureAnalysisScenario(renderMeshes, root, logicalSplatCount, definition, originalScale);
   await measureAnalysisFrame();
   const probes: AnalysisFrameProbe[] = [];
   for (let sample = 0; sample < sampleCount; sample += 1) {
@@ -641,22 +669,23 @@ async function measureAnalysisScenario(
     drawCalls: Math.max(...probes.map((probe) => probe.drawCalls)),
     triangles: Math.max(...probes.map((probe) => probe.triangles)),
     vertexInvocations: definition.visible
-      ? Math.max(...probes.map((probe) => probe.triangles)) * 3
+      ? definition.instanceCount * (renderMeshes[0]?.geometry.getAttribute('position').count ?? 6)
       : 0,
   };
 }
 
-async function measureCameraSort(
+async function measureCameraUpdate(
   renderMeshes: readonly SOGDrawMesh[],
   root: Group,
-  sourceSplatCount: number,
+  logicalSplatCount: number,
   originalScale: Vector3,
   originalPixelRatio: number,
   sampleCount: number,
-): Promise<BottleneckSortMeasurement | null> {
-  configureAnalysisScenario(renderMeshes, root, sourceSplatCount, {
-    id: 'sort',
-    label: 'Camera-change radix sort',
+  includesProjectionRefresh: boolean,
+): Promise<BottleneckCameraUpdateMeasurement | null> {
+  configureAnalysisScenario(renderMeshes, root, logicalSplatCount, {
+    id: 'camera-update',
+    label: 'Camera-change sort + projection/SH refresh',
     instanceCount: 1,
     pixelRatio: originalPixelRatio,
     modelScale: 1,
@@ -690,6 +719,7 @@ async function measureCameraSort(
       : null,
     cpuSubmitMedianMs: rounded(percentile(probes.map((probe) => probe.cpuSubmitMs), 0.5)),
     computePasses: Math.round(percentile(probes.map((probe) => probe.computePasses), 0.5)),
+    includesProjectionRefresh,
   };
 }
 
@@ -793,22 +823,23 @@ async function executeBottleneckAnalysis(): Promise<BottleneckAnalysis> {
       scenarios.push(await measureAnalysisScenario(
         renderMeshes,
         root,
-        mesh.resource.count,
+        exampleState.splatCount,
         definition,
         originalScale,
         5,
       ));
     }
-    setAnalysisProgress(definitions.length, totalStages, 'Camera-change radix sort');
-    const sort = await measureCameraSort(
+    setAnalysisProgress(definitions.length, totalStages, 'Camera-change sort + projection/SH refresh');
+    const cameraUpdate = await measureCameraUpdate(
       renderMeshes,
       root,
-      mesh.resource.count,
+      exampleState.splatCount,
       originalScale,
       originalPixelRatio,
       3,
+      mesh.diagnostics.projectedCacheEnabled,
     );
-    const derived = deriveBottleneckFindings(scenarios, sort);
+    const derived = deriveBottleneckFindings(scenarios, cameraUpdate);
     const fullScenario = scenarios.find((scenario) => scenario.id === 'full');
     const completedAt = new Date().toISOString();
     const report: BottleneckAnalysis = {
@@ -816,7 +847,7 @@ async function executeBottleneckAnalysis(): Promise<BottleneckAnalysis> {
       backend: mesh.diagnostics.backend,
       splatCount: exampleState.splatCount,
       sourceSplatCount: mesh.resource.count,
-      runtimeCopyCount: renderMeshes.length,
+      runtimeCopyCount: exampleState.runtimeCopyCount,
       timestampSupported: gpuTimestampSupported,
       startedAt,
       completedAt,
@@ -827,7 +858,7 @@ async function executeBottleneckAnalysis(): Promise<BottleneckAnalysis> {
         pixelRatio: originalPixelRatio,
       },
       scenarios,
-      sort,
+      cameraUpdate,
       findings: derived.findings,
       summary: derived.summary,
       notes: [
@@ -835,10 +866,10 @@ async function executeBottleneckAnalysis(): Promise<BottleneckAnalysis> {
         'Half DPR retains all instances and shader work while reducing drawing-buffer pixels to one quarter.',
         'Quarter DPR retains all instances and shader work while reducing drawing-buffer pixels to one sixteenth.',
         'Quarter model scale retains all instances and vertex work while reducing projected splat footprint.',
-        `The sort probe renders one instance and sorts the shared ${mesh.resource.count.toLocaleString()}-splat source payload, isolating camera-change compute from normal drawing.`,
-        ...(fullScenario && mesh.material.transparent && mesh.material.side === DoubleSide
+        `The camera-change probe renders one instance while sorting the shared ${mesh.resource.count.toLocaleString()}-splat source and refreshing ${exampleState.splatCount.toLocaleString()} cached projections; stationary frames run neither compute stage.`,
+        ...(fullScenario && mesh.material.transparent && mesh.material.side === DoubleSide && !mesh.material.forceSinglePass
           ? [`Transparent DoubleSide rendering produced ${fullScenario.drawCalls.toLocaleString()} draw calls and ${fullScenario.triangles.toLocaleString()} triangles in the full probe, approximately twice the splat geometry's single-sided triangle count.`]
-          : []),
+          : ['Transparent Gaussian sprites use forceSinglePass, avoiding Three.js\'s second DoubleSide geometry pass.']),
         'Invalid negative driver timestamp samples are discarded; the empty-pass GPU-completion latency is used as the fixed-cost proxy when needed.',
       ],
     };
@@ -904,7 +935,6 @@ analysisButton.addEventListener('click', () => {
 
 function disposeSelection(): void {
   if (currentRoot) scene.remove(currentRoot);
-  for (const renderMesh of currentRenderMeshes.slice(1)) renderMesh.geometry.dispose();
   currentRoot?.clear();
   currentMesh?.dispose();
   currentResource?.dispose();
@@ -954,6 +984,7 @@ async function loadSource(key: SourceKey): Promise<void> {
       },
     });
     mesh = new SOGGaussianSplatMesh(resource);
+    mesh.setInstanceTransforms(createRuntimeInstanceTransforms(resource, source));
     exampleState.state = 'preparing';
     status.textContent = `Preparing ${source.name}…`;
     await mesh.prepare(renderer, { signal: controller.signal });
@@ -975,7 +1006,7 @@ async function loadSource(key: SourceKey): Promise<void> {
     exampleState.backend = mesh.diagnostics.backend;
     exampleState.splatCount = composition.totalSplatCount;
     exampleState.sourceSplatCount = resource.count;
-    exampleState.runtimeCopyCount = composition.renderMeshes.length;
+    exampleState.runtimeCopyCount = composition.runtimeCopyCount;
     status.textContent = `${source.name} · ${composition.totalSplatCount.toLocaleString()} splats · ${mesh.diagnostics.backend}`;
     analysisButton.disabled = false;
     resetFrameMetrics();

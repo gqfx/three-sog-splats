@@ -70,9 +70,26 @@ backend. The local adapter selected Portable with `unsupported-vendor`, so
 OneSweep execution remains a compatible-NVIDIA hardware-conditioned result;
 r184-r185 compilation and safety-policy coverage passed locally.
 
-Sorting is suppressed on an unchanged view. Consequently this change does not
-improve stationary Lion SH2 shading cost: idle frames perform no radix work,
-and projection/SH caching remains outside this scope.
+Sorting is suppressed on an unchanged view. The subsequent projected-cache
+optimization also suppresses projection and SH refresh on an unchanged view;
+stationary cached frames therefore perform no compute work.
+
+### Projected-cache acceptance result
+
+WebGPU resources at or below one million unique splats, plus translated runtime
+batches, dequantize static attributes once during `prepare()`. Camera/model
+changes refresh packed clip centers, ellipses, and colors in compute. Stationary
+vertices only fetch that cached data. Transparent Gaussian sprites also use one
+DoubleSide pass and four indexed quad vertices.
+
+For the 4,877,475-splat Lion grid at 1280×720 DPR 2, this reduced full GPU render
+from about 248–252 ms to 137–138 ms, draw calls from 51 to 2, triangles from
+19,509,901 to 9,754,951, and the resolution-independent proxy from 139.1 ms to
+about 72 ms. Camera-change sort plus projection refresh measured 12.4 ms and was
+absent on stationary frames. Tracked renderer memory increased from about
+55.1 MB to 207.9 MB. A single five-million-unique-splat resource is not admitted
+to this cache, avoiding roughly 340 MB of extra storage with little benefit in
+the overdraw-dominated synthetic lattice.
 
 ### Five-million-splat stress scene
 

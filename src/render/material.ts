@@ -34,6 +34,7 @@ import {
   storage,
   textureLoad,
   uint,
+  unpackHalf2x16,
   varyingProperty,
   vec2,
   vec3,
@@ -53,15 +54,23 @@ export interface SOGMaterialTextures {
   readonly width: number;
 }
 
-function texelForIndex(index: any, width: number): any {
+export interface SOGProjectedBuffers {
+  readonly centers: StorageBufferAttribute;
+  readonly ellipses: StorageBufferAttribute;
+  readonly colors: StorageBufferAttribute;
+  readonly sourceCount: number;
+  readonly logicalCount: number;
+}
+
+export function texelForIndex(index: any, width: number): any {
   return ivec2(int(index.mod(uint(width))), int(index.div(uint(width))));
 }
 
-function codebookValue(codebook: Texture, index: any, channel: 'r' | 'g' | 'b'): any {
+export function codebookValue(codebook: Texture, index: any, channel: 'r' | 'g' | 'b'): any {
   return textureLoad(codebook, ivec2(int(index), int(0)))[channel];
 }
 
-function decodeCenter(textures: SOGMaterialTextures, meta: SOGMetaV2, index: any): any {
+export function decodeCenter(textures: SOGMaterialTextures, meta: SOGMetaV2, index: any): any {
   const pixel = texelForIndex(index, textures.width);
   const low = textureLoad(textures.meansLow, pixel).rgb;
   const high = textureLoad(textures.meansHigh, pixel).rgb;
@@ -78,12 +87,12 @@ function decodeCenter(textures: SOGMaterialTextures, meta: SOGMetaV2, index: any
   );
 }
 
-function rotateByQuaternion(vector: any, quaternion: any): any {
+export function rotateByQuaternion(vector: any, quaternion: any): any {
   const twice = cross(quaternion.xyz, vector).add(quaternion.w.mul(vector)).mul(2);
   return vector.add(cross(quaternion.xyz, twice));
 }
 
-function decodeQuaternion(textures: SOGMaterialTextures, pixel: any): any {
+export function decodeQuaternion(textures: SOGMaterialTextures, pixel: any): any {
   const encoded = textureLoad(textures.quats, pixel);
   const abc = encoded.xyz.sub(0.5).mul(Math.SQRT2);
   const missing = sqrt(max(0, float(1).sub(dot(abc, abc))));
@@ -101,7 +110,7 @@ function decodeQuaternion(textures: SOGMaterialTextures, pixel: any): any {
   return normalize(quaternion);
 }
 
-function decodeScale(textures: SOGMaterialTextures, pixel: any): any {
+export function decodeScale(textures: SOGMaterialTextures, pixel: any): any {
   const encoded = textureLoad(textures.scales, pixel).rgb.mul(255).round();
   return vec3(
     exp(codebookValue(textures.codebook, encoded.x, 'r')),
@@ -110,7 +119,7 @@ function decodeScale(textures: SOGMaterialTextures, pixel: any): any {
   );
 }
 
-function shBasis(direction: any): any[] {
+export function shBasis(direction: any): any[] {
   const x = direction.x;
   const y = direction.y;
   const z = direction.z;
@@ -175,6 +184,7 @@ export function createSOGMaterial(
   meta: SOGMetaV2,
   orderAttribute: StorageBufferAttribute | InstancedBufferAttribute,
   backend: 'webgpu' | 'webgl',
+  projected?: SOGProjectedBuffers,
 ): NodeMaterial {
   const order = backend === 'webgpu'
     ? storage(orderAttribute as StorageBufferAttribute, 'uint', meta.count)
@@ -185,10 +195,40 @@ export function createSOGMaterial(
   material.depthTest = true;
   material.depthWrite = false;
   material.side = DoubleSide;
+  // Gaussian quads are flat sprites. Rendering transparent DoubleSide material
+  // in two passes repeats all vertex work while the back-face pass contributes
+  // no additional coverage.
+  material.forceSinglePass = true;
   material.blending = NormalBlending;
 
   material.vertexNode = Fn(() => {
     const corner = (attribute('position', 'vec3') as any).xy;
+    if (backend === 'webgpu' && projected) {
+      const projectedCenters = storage(projected.centers, 'vec4', projected.logicalCount).toReadOnly();
+      const projectedEllipses = storage(projected.ellipses, 'uvec2', projected.logicalCount).toReadOnly();
+      const projectedColors = storage(projected.colors, 'uint', projected.logicalCount).toReadOnly();
+      const copyIndex = instanceIndex.div(uint(projected.sourceCount));
+      const sourceOrderIndex = instanceIndex.mod(uint(projected.sourceCount));
+      const sourceIndex = order!.element(sourceOrderIndex);
+      const projectedIndex = copyIndex.mul(uint(projected.sourceCount)).add(sourceIndex);
+      const centerClip = projectedCenters.element(projectedIndex).toVar();
+      const packedEllipse = projectedEllipses.element(projectedIndex);
+      const ellipseX = unpackHalf2x16(packedEllipse.x) as any;
+      const ellipseY = unpackHalf2x16(packedEllipse.y) as any;
+      centerClip.xy.addAssign(
+        ellipseX.mul(corner.x).add(ellipseY.mul(corner.y)).mul(centerClip.w).mul(2),
+      );
+      const packedColor = projectedColors.element(projectedIndex);
+      const color = vec4(
+        float(packedColor.bitAnd(uint(0xff))),
+        float(packedColor.shiftRight(uint(8)).bitAnd(uint(0xff))),
+        float(packedColor.shiftRight(uint(16)).bitAnd(uint(0xff))),
+        float(packedColor.shiftRight(uint(24)).bitAnd(uint(0xff))),
+      ).div(255);
+      varyingProperty('vec2', 'sogCorner').assign(corner);
+      varyingProperty('vec4', 'sogColor').assign(color);
+      return centerClip;
+    }
     const sourceIndex = backend === 'webgpu'
       ? order!.element(instanceIndex)
       : attribute('sogOrder', 'uint');
@@ -246,10 +286,11 @@ export function createSOGGeometry(
     -1, -1, 0,
     1, -1, 0,
     1, 1, 0,
-    -1, -1, 0,
-    1, 1, 0,
     -1, 1, 0,
   ], 3));
+  // Reuse the four quad corners instead of invoking the vertex shader for six
+  // duplicated non-indexed vertices per splat.
+  geometry.setIndex([0, 1, 2, 0, 2, 3]);
   if (orderAttribute) geometry.setAttribute('sogOrder', orderAttribute);
   geometry.instanceCount = count;
   const coverageRadius = maxScale * 2;

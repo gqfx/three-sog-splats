@@ -1,60 +1,78 @@
-# 4.88M runtime Lion grid bottleneck analysis
+# 4.88M runtime Lion grid optimization result
 
-Date: 2026-08-16  
-Three.js: 0.185.0  
-Source: one full 195,099-splat SH2 Lion, instanced 25 times at runtime  
-Logical render count: 4,877,475 splats  
-Viewport: 1280×720 CSS pixels, DPR 2 (2560×1440 drawing buffer)  
+Date: 2026-08-16
+
+Three.js: 0.185.0
+
+Source: one full 195,099-splat SH2 Lion, batched into 25 translated copies
+
+Logical render count: 4,877,475 splats
+
+Viewport: 1280×720 CSS pixels, DPR 2 (2560×1440 drawing buffer)
+
 Backend: WebGPU, Portable radix (16 bits, `unsupported-vendor` selection)
 
-This scene was added to distinguish the adversarial overdraw of the synthetic
-5M lattice from costs that remain with real captured Gaussian data. The Example
-downloads the existing 3,287,509-byte `lion.sog` once and prepares one set of
-textures, SH2 palette, material, and sort resources. Twenty-four lightweight
-draw meshes share those resources with the prepared SOG mesh and apply distinct
-XY translations, forming a non-overlapping 5×5 Lion grid.
+The Example downloads and decodes the existing 3,287,509-byte `lion.sog`
+once. It now submits the 5×5 grid as one batched splat draw. All copies share
+one source payload, one static dequantization cache, and one 195,099-entry depth
+order; only their camera-dependent projected centers, ellipses, and SH colors
+have per-copy cache entries.
 
-## Results
+## Implemented hot-path changes
 
-| Probe | Logical instances | DPR | Model scale | Median GPU render | CPU submit | Draw calls | Triangles |
+1. Transparent `DoubleSide` sprites set `forceSinglePass = true`.
+2. The quad uses four indexed corners instead of six duplicated vertices.
+3. A preparation compute pass dequantizes center, quaternion, scale, base color,
+   SH labels, and the SH palette once into compact GPU storage.
+4. Camera/model changes run two compute stages: the existing shared radix sort
+   and a projection/SH refresh. Unchanged frames run zero compute passes.
+5. The vertex shader reads cached clip center, packed ellipse, and packed color;
+   it no longer samples SOG textures, runs exponentials, reconstructs
+   quaternions, evaluates SH2, or calculates covariance every frame.
+6. Projected caching is adaptive. It is enabled for batched copies and resources
+   up to one million unique splats. A single larger unique resource keeps the
+   indexed single-pass path to avoid hundreds of megabytes of unhelpful cache.
+
+## Controlled result
+
+| Probe | Instances | DPR | Scale | Median GPU render | CPU submit | Draw calls | Triangles |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Empty pass | 0 | 2 | 1 | 1.0 ms completion proxy | 0.1 ms | 1 | 1 |
-| Instance ramp | 100,000 | 2 | 1 | 9.3 ms | 0.2 ms | 3 | 400,001 |
-| Instance ramp | 500,000 | 2 | 1 | 36.9 ms | 0.6 ms | 7 | 2,000,001 |
-| Instance ramp | 1,000,000 | 2 | 1 | 71.4 ms | 0.7 ms | 13 | 4,000,001 |
-| Instance ramp | 2,000,000 | 2 | 1 | 131.3 ms | 0.6 ms | 23 | 8,000,001 |
-| Full Lion grid | 4,877,475 | 2 | 1 | 247.9 ms | 0.9 ms | 51 | 19,509,901 |
-| Half DPR | 4,877,475 | 1 | 1 | 161.7 ms | 1.0 ms | 51 | 19,509,901 |
-| Quarter DPR | 4,877,475 | 0.5 | 1 | 150.9 ms | 1.1 ms | 51 | 19,509,901 |
-| Quarter model scale | 4,877,475 | 2 | 0.25 | 149.2 ms | 1.1 ms | 51 | 19,509,901 |
+| Empty | 0 | 2 | 1 | 1.4 ms proxy | 0.1 ms | 1 | 1 |
+| Ramp | 100,000 | 2 | 1 | 6.9 ms | 0.1 ms | 2 | 200,001 |
+| Ramp | 500,000 | 2 | 1 | 35.8 ms | 0.4 ms | 2 | 1,000,001 |
+| Ramp | 1,000,000 | 2 | 1 | 47.4 ms | 0.4 ms | 2 | 2,000,001 |
+| Ramp | 2,000,000 | 2 | 1 | 107.2 ms | 0.5 ms | 2 | 4,000,001 |
+| Full grid | 4,877,475 | 2 | 1 | 138.3 ms | 0.6 ms | 2 | 9,754,951 |
+| Half DPR | 4,877,475 | 1 | 1 | 125.0 ms | 0.5 ms | 2 | 9,754,951 |
+| Quarter DPR | 4,877,475 | 0.5 | 1 | 50.9 ms | 0.4 ms | 2 | 9,754,951 |
+| Quarter scale | 4,877,475 | 2 | 0.25 | 52.4 ms | 0.3 ms | 2 | 9,754,951 |
 
-The live loop stabilized around 5 FPS. Library diagnostics account for only
-10,698,036 bytes of source textures and sorting resources because the source is
-prepared once. Three's total tracked renderer memory was 55,116,474 bytes,
-including the renderer, pipelines, and the lightweight per-copy geometries.
+The live loop stabilized around 9 FPS. Three reported about 207.9 MB of tracked
+renderer memory; library diagnostics accounted for about 163.5 MB. The extra
+memory is the deliberate projected cache, not 25 decompressed source copies.
 
-## Attribution and lattice comparison
+The camera-change probe measured 12.4 ms median GPU compute across the shared
+radix sort and the 4,877,475-entry projection/SH refresh. Stationary frames
+reported zero compute passes. Preparation-time static dequantization took about
+4.4 ms and projection-pipeline warmup about 19.5 ms in the sampled run; archive
+and WebP decode remain one-time loader work.
 
-The controlled DPR fit attributes approximately 139.1 ms to resolution-
-independent per-instance vertex/attribute/SH work and 106.7 ms to pixel-scaled
-fragment blending and overdraw.
+## Before/after
 
-| Metric | Synthetic lattice 5M | Runtime Lion grid 4.88M | Difference |
+| Metric | Before | After | Change |
 | --- | ---: | ---: | ---: |
-| Full GPU render | 350.9 ms | 247.9 ms | −103.0 ms (−29%) |
-| Fragment/overdraw proxy | 189.1 ms | 106.7 ms | −82.4 ms (−44%) |
-| Per-instance proxy | 160.1 ms | 139.1 ms | −21.0 ms (−13%) |
-| CPU submission | 0.6 ms | 0.9 ms | +0.3 ms |
+| Live FPS | about 5.1 | about 9.2 | about +80% |
+| Full GPU render | 247.9–252.0 ms | 137–138 ms | about −45% |
+| Draw calls | 51 | 2 | −96% |
+| Triangles | 19,509,901 | 9,754,951 | −50% |
+| Estimated splat vertex invocations | 58,529,700 | 19,509,900 | −67% |
+| Resolution-independent proxy | 139.1 ms | 72.0 ms | −48% |
+| Fragment/overdraw proxy | 106.7 ms | 71.7 ms | −33% |
+| Camera-change compute | 0.3 ms sort only | 12.4 ms sort + projection/SH | conditional tradeoff |
+| Tracked renderer memory | 55.1 MB | 207.9 MB | +152.8 MB cache |
 
-The lattice therefore does materially exaggerate overdraw, but it does not
-create the entire performance problem. The real-data grid still submits about
-58.5 million vertex shader invocations and 19.5 million triangles. Transparent
-`DoubleSide` rendering produces two splat draws per Lion plus one output pass,
-which explains the 51 draw calls. Removing the unnecessary second splat pass
-and reducing per-vertex decode remain the first structural optimizations.
-
-The grid's 0.3 ms camera-sort result is intentionally not comparable with the
-lattice's 7.1 ms 5M sort: all translated copies share one 195,099-entry order
-buffer, and translation adds the same view-space depth constant to every splat
-inside a copy. The scene is valid for stationary render/overdraw comparison;
-it is not a benchmark for sorting 4.88 million unique centers.
+This confirms the original diagnosis: decompression was never a per-frame
+cost. The optimization moves shader dequantization and projection out of the
+stationary frame in exchange for a bounded cache and more work only when the
+view changes. The remaining roughly equal bottlenecks are cached per-instance
+fetch/quad expansion and fragment blending/overdraw.

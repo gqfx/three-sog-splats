@@ -15,19 +15,20 @@ export interface BottleneckScenario {
   readonly vertexInvocations: number;
 }
 
-export interface BottleneckSortMeasurement {
+export interface BottleneckCameraUpdateMeasurement {
   readonly sampleCount: number;
   readonly gpuComputeMedianMs: number | null;
   readonly gpuComputeP95Ms: number | null;
   readonly cpuSubmitMedianMs: number;
   readonly computePasses: number;
+  readonly includesProjectionRefresh: boolean;
 }
 
 export interface BottleneckFinding {
   readonly stage:
-    | 'per-instance-vertex-and-attribute-decode'
+    | 'cached-screen-space-fetch'
     | 'fragment-blending-and-overdraw'
-    | 'radix-sort-while-moving'
+    | 'camera-change-sort-and-projection'
     | 'fixed-render-overhead'
     | 'cpu-command-submission';
   readonly impactMs: number;
@@ -51,7 +52,7 @@ export interface BottleneckAnalysis {
     readonly pixelRatio: number;
   };
   readonly scenarios: readonly BottleneckScenario[];
-  readonly sort: BottleneckSortMeasurement | null;
+  readonly cameraUpdate: BottleneckCameraUpdateMeasurement | null;
   readonly findings: readonly BottleneckFinding[];
   readonly summary: string;
   readonly notes: readonly string[];
@@ -70,7 +71,7 @@ function scenario(
 
 export function deriveBottleneckFindings(
   scenarios: readonly BottleneckScenario[],
-  sort: BottleneckSortMeasurement | null,
+  cameraUpdate: BottleneckCameraUpdateMeasurement | null,
 ): { findings: BottleneckFinding[]; summary: string } {
   const empty = scenario(scenarios, 'empty');
   const full = scenario(scenarios, 'full');
@@ -136,10 +137,10 @@ export function deriveBottleneckFindings(
       : 0;
 
     findings.push({
-      stage: 'per-instance-vertex-and-attribute-decode',
+      stage: 'cached-screen-space-fetch',
       impactMs: rounded(perInstanceImpact),
       conditional: false,
-      evidence: `${full.instanceCount.toLocaleString()} splats produced ${full.triangles.toLocaleString()} triangles (~${rounded(passMultiplier)}x the single-sided count) and about ${full.vertexInvocations.toLocaleString()} vertex shader invocations. The resolution model estimates ${rounded(perInstanceImpact)} ms of pixel-count-independent work; GPU render remained ${rounded(scaleRatio * 100)}% at quarter model scale.`,
+      evidence: `${full.instanceCount.toLocaleString()} splats produced ${full.triangles.toLocaleString()} triangles (~${rounded(passMultiplier)}x the single-sided count) and about ${full.vertexInvocations.toLocaleString()} vertex shader invocations. The resolution model estimates ${rounded(perInstanceImpact)} ms of pixel-count-independent work after static dequantization and camera-dependent projection have been cached; GPU render remained ${rounded(scaleRatio * 100)}% at quarter model scale.`,
     });
     findings.push({
       stage: 'fragment-blending-and-overdraw',
@@ -162,21 +163,23 @@ export function deriveBottleneckFindings(
     evidence: `Submitting the full-scene frame took ${rounded(full.cpuSubmitMedianMs)} ms on the CPU, excluding GPU execution.`,
   });
 
-  if (sort?.gpuComputeMedianMs !== null && sort?.gpuComputeMedianMs !== undefined) {
+  if (cameraUpdate?.gpuComputeMedianMs !== null && cameraUpdate?.gpuComputeMedianMs !== undefined) {
     findings.push({
-      stage: 'radix-sort-while-moving',
-      impactMs: rounded(sort.gpuComputeMedianMs),
+      stage: 'camera-change-sort-and-projection',
+      impactMs: rounded(cameraUpdate.gpuComputeMedianMs),
       conditional: true,
-      evidence: `A camera change added ${rounded(sort.gpuComputeMedianMs)} ms median GPU compute across ${sort.computePasses} compute passes; stationary frames do not run the sort.`,
+      evidence: cameraUpdate.includesProjectionRefresh
+        ? `A camera change added ${rounded(cameraUpdate.gpuComputeMedianMs)} ms median GPU compute across ${cameraUpdate.computePasses} compute passes for radix sorting plus projection/SH cache refresh; stationary frames run neither stage.`
+        : `A camera change added ${rounded(cameraUpdate.gpuComputeMedianMs)} ms median GPU compute across ${cameraUpdate.computePasses} compute passes for radix sorting; stationary frames do not run the sort.`,
     });
   }
 
   findings.sort((left, right) => right.impactMs - left.impactMs);
   const primary = findings.find((finding) => !finding.conditional && finding.impactMs > 0)
     ?? findings[0];
-  const movingSort = findings.find((finding) => finding.stage === 'radix-sort-while-moving');
+  const movingUpdate = findings.find((finding) => finding.stage === 'camera-change-sort-and-projection');
   const summary = primary
-    ? `Primary stationary bottleneck: ${primary.stage} (~${primary.impactMs} ms proxy impact).${movingSort ? ` Camera motion additionally runs radix sort (~${movingSort.impactMs} ms GPU compute).` : ''}`
+    ? `Primary stationary bottleneck: ${primary.stage} (~${primary.impactMs} ms proxy impact).${movingUpdate ? ` Camera motion additionally ${cameraUpdate?.includesProjectionRefresh ? 'refreshes sort/projection caches' : 'runs radix sort'} (~${movingUpdate.impactMs} ms GPU compute).` : ''}`
     : 'No dominant stage could be derived from the available timing samples.';
 
   return { findings, summary };

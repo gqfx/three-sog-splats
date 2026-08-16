@@ -115,9 +115,15 @@ export interface SOGRenderDiagnostics {
   prepareDurationMs: number;
   uploadDurationMs: number;
   compileDurationMs: number;
+  staticDecodeDurationMs: number;
+  projectionWarmupDurationMs: number;
   firstVisibleFrameDurationMs: number;
   sortDurationMs: number;
   sortCount: number;
+  projectionRefreshDurationMs: number;
+  projectionRefreshCount: number;
+  projectedCacheEnabled: boolean;
+  instanceTransformCount: number;
   readbackCount: number;
   orderUploadCount: number;
   activeSplatCount: number;

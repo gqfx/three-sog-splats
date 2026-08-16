@@ -85,6 +85,18 @@ pass. This double pass is unnecessary work for screen-aligned Gaussian quads.
    only after the two render bottlenecks are reduced enough for its 7.1 ms
    motion-only cost to become material.
 
+## Implementation follow-up
+
+The single-pass material and four-corner indexed quad are now implemented. A
+camera-dependent projected cache is also implemented, but is intentionally not
+admitted for this scene: all 5,000,000 splats are unique, so the cache would add
+about 340 MB while the synthetic lattice remains fragment/overdraw dominated.
+The adaptive path therefore reports `projectedCacheEnabled: false`, keeps the
+original roughly 244.6 MB tracked footprint, submits two draws and 10,000,001
+triangles, and continues to run no compute on stationary frames. Batched real
+data, where one source is reused many times, receives the full cache benefit;
+see `performance-analysis-lion-grid-5m.md`.
+
 References:
 
 - Three.js Material `forceSinglePass`: https://threejs.org/docs/pages/Material.html

@@ -1,4 +1,4 @@
-import { PerspectiveCamera } from 'three/webgpu';
+import { Matrix4, PerspectiveCamera } from 'three/webgpu';
 import { describe, expect, it, vi } from 'vitest';
 import type { WebGPURenderer } from 'three/webgpu';
 import { SOGGaussianSplatMesh } from '../../src/render/SOGGaussianSplatMesh.js';
@@ -76,6 +76,35 @@ describe('SOGGaussianSplatMesh lifecycle', () => {
     await expect(mesh.prepare(fakeRenderer())).rejects.toMatchObject({
       code: 'RENDERER_MISMATCH',
     });
+    mesh.dispose();
+    source.dispose();
+  });
+
+  it('batches configured transforms into one cached WebGPU geometry', async () => {
+    const source = await resource();
+    const mesh = new SOGGaussianSplatMesh(source).setInstanceTransforms([
+      new Matrix4(),
+      new Matrix4().makeTranslation(2, 0, 0),
+    ]);
+    await mesh.prepare(fakeRenderer());
+    expect(mesh.geometry.instanceCount).toBe(8);
+    expect(mesh.geometry.index?.count).toBe(6);
+    expect(mesh.material.forceSinglePass).toBe(true);
+    expect(mesh.diagnostics.activeSplatCount).toBe(8);
+    expect(mesh.diagnostics.instanceTransformCount).toBe(2);
+    expect(mesh.diagnostics.projectedCacheEnabled).toBe(true);
+    expect(mesh.diagnostics.staticDecodeDurationMs).toBeGreaterThanOrEqual(0);
+    expect(() => mesh.setInstanceTransforms([new Matrix4()])).toThrow(/before prepare/);
+    mesh.dispose();
+    source.dispose();
+  });
+
+  it('rejects non-translation batch transforms that cannot share one order', async () => {
+    const source = await resource();
+    const mesh = new SOGGaussianSplatMesh(source);
+    expect(() => mesh.setInstanceTransforms([
+      new Matrix4().makeRotationY(0.25),
+    ])).toThrow(/translations only/);
     mesh.dispose();
     source.dispose();
   });

@@ -21,12 +21,13 @@ lattice for WebGPU memory, sorting, and overdraw stress. Generate it with
 `npm run generate:5m`; forced WebGL redirects this source to WebGPU.
 
 For a less adversarial comparison, **Lion grid** downloads and decodes the
-existing 195,099-splat SH2 Lion exactly once, then creates 25 translated draw
-instances in a 5×5 layout at runtime. The instances share the decoded textures,
-material, SH palette, and sort order, so the logical render count is 4,877,475
-without storing or uploading 25 physical copies of the source payload. Its
-translations do not change each Lion's internal depth order, and the copies do
-not overlap on screen. Forced WebGL redirects this source to WebGPU.
+existing 195,099-splat SH2 Lion exactly once, then batches 25 translated copies
+into one splat draw in a 5×5 layout. The copies share the source textures,
+one-time static dequantization cache, SH palette, and sort order. Their compact
+camera-dependent projections are refreshed only when the camera/model changes,
+so stationary frames run no compute. The logical render count is 4,877,475
+without storing or uploading 25 physical source payloads. Forced WebGL
+redirects this source to WebGPU.
 
 The Lion fixture also exercises the production SOG v2 SH layout: its metadata
 declares a 65,536-entry, two-band palette and its centroid texture is
@@ -45,7 +46,8 @@ timing label.
 
 **Analyze bottleneck** pauses the animation loop and runs a controlled profile:
 an empty pass, increasing instance counts, full/half/quarter DPR, quarter model
-scale, and a camera-change sort with only one rendered instance. It uses Three's
+scale, and a camera-change sort plus projection/SH-cache refresh with only one
+rendered instance. It uses Three's
 public timestamp-query API and restores the exact camera, mesh, DPR, motion, and
 animation state afterward. The report is shown in the diagnostics overlay and
 available from `window.__THREE_SOG_EXAMPLE__.analysis`; automation can also call

@@ -322,7 +322,7 @@ for (const backend of ['webgpu', 'webgl'] as const) {
   });
 }
 
-test('controlled profiler isolates render, resolution, and camera-sort stages', async ({ page }) => {
+test('controlled profiler isolates cached rendering, resolution, and camera-update stages', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/webgpu_sog.html?source=no-sh');
@@ -359,6 +359,10 @@ test('controlled profiler isolates render, resolution, and camera-sort stages', 
   expect(full?.drawCalls).toBeGreaterThan(0);
   expect(full?.triangles).toBeGreaterThan(116_374 * 2);
   expect(result.analysis?.findings.length).toBeGreaterThan(0);
+  expect(result.analysis?.findings.some((finding) => (
+    finding.stage === 'cached-screen-space-fetch'
+  ))).toBe(true);
+  expect(result.analysis?.cameraUpdate?.computePasses).toBeGreaterThan(0);
   await expect(page.getByRole('button', { name: 'Analyze bottleneck' })).toBeEnabled();
   expect(errors).toEqual([]);
 });
@@ -393,8 +397,11 @@ test('builds the 4.88M Lion grid from one downloaded and prepared source', async
   expect(snapshot.performance?.activeSplatCount).toBe(4_877_475);
   expect(snapshot.performance?.sourceSplatCount).toBe(195_099);
   expect(snapshot.performance?.runtimeCopyCount).toBe(25);
-  expect(snapshot.performance?.drawCalls).toBe(51);
-  expect(snapshot.performance?.triangles).toBe(19_509_901);
+  expect(snapshot.performance?.drawCalls).toBe(2);
+  expect(snapshot.performance?.triangles).toBe(9_754_951);
+  expect(snapshot.performance?.computePasses).toBe(0);
+  expect(snapshot.performance?.staticDecodeDurationMs).toBeGreaterThanOrEqual(0);
+  expect(snapshot.performance?.projectionRefreshCount).toBeGreaterThan(0);
   expect(snapshot.resources.filter((url) => url.endsWith('/lion.sog'))).toHaveLength(1);
   expect(snapshot.resources.some((url) => /lion-grid-5m\.sog/.test(url))).toBe(false);
   expect(errors).toEqual([]);

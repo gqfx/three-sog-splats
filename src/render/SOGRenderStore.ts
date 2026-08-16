@@ -11,6 +11,7 @@ import type {
 } from '../core/types.js';
 import type { GpuRadixSorter } from './sort/GpuRadixSorter.js';
 import type { WebGLSortBackend } from './sort/WebGLSortBackend.js';
+import type { SOGWebGPUCache } from './SOGWebGPUCache.js';
 
 export class SOGRenderStore {
   readonly backend: SOGBackendKind;
@@ -19,6 +20,7 @@ export class SOGRenderStore {
   readonly geometry: InstancedBufferGeometry;
   readonly material: NodeMaterial;
   readonly gpuSorter?: GpuRadixSorter;
+  readonly webgpuCache?: SOGWebGPUCache;
   readonly webglSorter?: WebGLSortBackend;
   readonly activeRange: SOGActiveRange;
   #disposed = false;
@@ -30,6 +32,7 @@ export class SOGRenderStore {
     geometry: InstancedBufferGeometry;
     material: NodeMaterial;
     gpuSorter?: GpuRadixSorter;
+    webgpuCache?: SOGWebGPUCache;
     webglSorter?: WebGLSortBackend;
     count: number;
     matrix: Matrix4;
@@ -40,6 +43,7 @@ export class SOGRenderStore {
     this.geometry = options.geometry;
     this.material = options.material;
     if (options.gpuSorter) this.gpuSorter = options.gpuSorter;
+    if (options.webgpuCache) this.webgpuCache = options.webgpuCache;
     if (options.webglSorter) this.webglSorter = options.webglSorter;
     this.activeRange = { offset: 0, count: options.count, matrix: options.matrix };
   }
@@ -48,6 +52,7 @@ export class SOGRenderStore {
     if (this.#disposed) return;
     this.#disposed = true;
     this.gpuSorter?.dispose();
+    this.webgpuCache?.dispose();
     this.webglSorter?.dispose();
     this.material.dispose();
     this.geometry.dispose();

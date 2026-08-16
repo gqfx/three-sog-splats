@@ -77,7 +77,8 @@ key 的 splat 保持源顺序。
 - `SOGResource`：提供只读 metadata、bounds、原生图片、SH bands、加载诊断、
   clone 和幂等 dispose。
 - `SOGGaussianSplatMesh`：普通 Three.js Mesh，支持显式异步 `prepare()`、场景
-  transform、单个全资源 active range、渲染诊断和幂等 dispose。
+  transform、在 prepare 前通过 `setInstanceTransforms()` 批量配置平移副本、
+  单个全资源 active range、渲染诊断和幂等 dispose。
 - `SOGError`：提供 `ABORTED`、`INVALID_ARCHIVE`、`INVALID_METADATA`、
   `UNSUPPORTED_RENDERER`、`RENDERER_MISMATCH` 等稳定错误码。
 - options、state、metadata、bounds、diagnostics 和 disposal 类型均从包根导出。
@@ -114,9 +115,10 @@ Splatting example 的页面结构，真实模型选项包括：no-SH 使用完�
 DPR 和 backend 对应的排序计时含义。参见[示例说明](./examples/README.md)。
 来源列表还包含可复现的 5,000,000-splat 合成 WebGPU 压测场景；Portable 路径报告
 约 200 MB GPU 资源，若当前为强制 WebGL 会自动切换到 WebGPU。
-为了与真实数据对照，Lion grid 只下载一次同一份 3.3 MB Lion SOG，并让 25 个平移
-后的运行时绘制实例共享已准备好的纹理、SH palette、材质和排序 buffer，逻辑总数为
-4,877,475 splats；仓库和 GPU 都不会保存 25 份展开后的源数据。
+为了与真实数据对照，Lion grid 只下载一次同一份 3.3 MB Lion SOG，并把 25 个平移
+副本合成一次 draw，逻辑总数为 4,877,475 splats。静态属性只在准备期解量化一次，
+投影与 SH 只在相机/模型变化时刷新；静止帧不运行 compute。仓库和 GPU 都不会保存
+25 份展开后的源数据。
 
 ## 开发验证
 
