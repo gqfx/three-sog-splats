@@ -10,6 +10,7 @@ export type {
   SOGAttributeName,
   SOGBackendKind,
   SOGBounds,
+  SOGContributionCullingStats,
   SOGImageDecoder,
   SOGLoadDiagnostics,
   SOGLoadOptions,

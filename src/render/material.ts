@@ -58,6 +58,7 @@ export interface SOGProjectedBuffers {
   readonly centers: StorageBufferAttribute;
   readonly ellipses: StorageBufferAttribute;
   readonly colors: StorageBufferAttribute;
+  readonly visibleIndices: StorageBufferAttribute;
   readonly sourceCount: number;
   readonly logicalCount: number;
 }
@@ -207,8 +208,10 @@ export function createSOGMaterial(
       const projectedCenters = storage(projected.centers, 'vec4', projected.logicalCount).toReadOnly();
       const projectedEllipses = storage(projected.ellipses, 'uvec2', projected.logicalCount).toReadOnly();
       const projectedColors = storage(projected.colors, 'uint', projected.logicalCount).toReadOnly();
-      const copyIndex = instanceIndex.div(uint(projected.sourceCount));
-      const sourceOrderIndex = instanceIndex.mod(uint(projected.sourceCount));
+      const visibleIndices = storage(projected.visibleIndices, 'uint', projected.logicalCount).toReadOnly();
+      const logicalIndex = visibleIndices.element(instanceIndex);
+      const copyIndex = logicalIndex.div(uint(projected.sourceCount));
+      const sourceOrderIndex = logicalIndex.mod(uint(projected.sourceCount));
       const sourceIndex = order!.element(sourceOrderIndex);
       const projectedIndex = copyIndex.mul(uint(projected.sourceCount)).add(sourceIndex);
       const centerClip = projectedCenters.element(projectedIndex).toVar();

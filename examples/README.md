@@ -29,6 +29,12 @@ so stationary frames run no compute. The logical render count is 4,877,475
 without storing or uploading 25 physical source payloads. Forced WebGL
 redirects this source to WebGPU.
 
+On cached WebGPU paths, contribution culling is enabled by default at threshold
+1. Camera/alpha, off-screen, and opacity-weighted projected-area rejection is
+followed by a stable GPU scan/scatter, and indexed indirect drawing submits only
+the survivors. The controls expose enable/disable, threshold, and an explicit
+telemetry readback; normal rendering does not read the counters back.
+
 The Lion fixture also exercises the production SOG v2 SH layout: its metadata
 declares a 65,536-entry, two-band palette and its centroid texture is
 512×1024. The loader derives this geometry from `shN.count` and `shN.bands`;
@@ -46,8 +52,10 @@ timing label.
 
 **Analyze bottleneck** pauses the animation loop and runs a controlled profile:
 an empty pass, increasing instance counts, full/half/quarter DPR, quarter model
-scale, and a camera-change sort plus projection/SH-cache refresh with only one
-rendered instance. It uses Three's
+scale, a same-view contribution-culling on/off A/B, and a camera-change sort
+plus projection/SH-cache/compaction refresh with only one rendered instance.
+Resolution/scale probes adjust the threshold by projected pixel area to retain
+a comparable survivor set. It uses Three's
 public timestamp-query API and restores the exact camera, mesh, DPR, motion, and
 animation state afterward. The report is shown in the diagnostics overlay and
 available from `window.__THREE_SOG_EXAMPLE__.analysis`; automation can also call

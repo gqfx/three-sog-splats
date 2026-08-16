@@ -11,7 +11,7 @@ Compatibility window: Three.js 0.184.0-0.185.0
 | Cancellation and ownership | In-flight dedupe, per-caller detach, final-consumer abort, reverse cleanup, repeated idempotent disposal | Pass |
 | Direct Three.js API boundary | No renderer adapter; contract scan over every source file; clean official r184/r185 builds used in browser tests | Pass |
 | Explicit preparation | Texture/codebook initialization, initial sort, material/compute compilation, visibility gate, abort/failure cleanup | Pass |
-| WebGPU path | Weighted adaptive keys, stable 4-bit Portable radix, guarded 8-bit OneSweep, GPU order consumption, one-time static dequantization, camera-change projection/SH cache, stationary compute suppression, zero production readbacks, and explicit sort verification | Pass |
+| WebGPU path | Weighted adaptive keys, stable 4-bit Portable radix, guarded 8-bit OneSweep, GPU order consumption, one-time static dequantization, camera-change projection/SH cache, stable contribution/frustum compaction, indexed indirect drawing, stationary compute suppression, zero production readbacks, and explicit sort/culling verification | Pass |
 | Radix safety policy | Deterministic admission tests reject missing subgroup signals, non-NVIDIA/ambiguous adapters, custom devices, and unsafe subgroup sizes; local browser reports Portable with `unsupported-vendor` | Pass |
 | forced WebGL fallback | One center readback with framebuffer-row normalization, Worker sort and pooled result transfer, instanced order upload, static suppression, stale-result disposal | Pass |
 | Scene/depth integration | Tolerant browser baselines include object transform and an opaque foreground occluder; depth test on and depth writes off | Pass |
@@ -25,7 +25,7 @@ Release validation is run with `npm run test:acceptance`, which includes the
 browser and external-consumer gates. The final command record is updated
 whenever the compatibility baseline or fixture output changes.
 
-Final run: typecheck, lint, declaration and example builds, 104 unit/integration
+Final run: typecheck, lint, declaration and example builds, 110 unit/integration
 tests, 13 real-browser tests on both r184 and r185, and the external
 package-consumer check all passed. The browser run exercised WebGPU and forced
 WebGL for internal synthetic no-SH/SH fixtures and the full-resolution
@@ -38,7 +38,10 @@ The WebGPU browser run also constructed a 5×5 Lion grid with 4,877,475 logical
 splats from one `/lion.sog` request and one prepared GPU payload. It verified 25
 runtime copies batched into one splat draw, 2 full-frame draw calls, 9,754,951
 triangles, zero stationary compute passes, no expanded grid fixture request,
-and successful controlled full/half/quarter-DPR profiling.
+and successful controlled full/half/quarter-DPR plus contribution-culling on/off
+profiling. Default threshold 1 submitted 370,180 survivors; explicit counters
+partitioned all 4,877,475 logical splats. The full-view A/B measured 21.7 ms
+with stable compaction and 130.9 ms with culling disabled.
 
 The local Chrome adapter was not an admitted NVIDIA target. Its OneSweep
 result is therefore explicitly hardware-conditioned: source/API compilation

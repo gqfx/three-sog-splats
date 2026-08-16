@@ -17,7 +17,7 @@ The package integrates directly with public `three`, `three/webgpu`, and
 | r167 | Introduced the separately consumable WebGPU/TSL build used through `three/webgpu` | Necessary foundation, but insufficient |
 | r180 | Exposes `floatBitsToUint`, used to generate sortable IEEE-754 depth keys without GPU readback | Necessary for the WebGPU sorter, but insufficient |
 | r183 | Exposes explicit render-target initialization used by the WebGL preparation readback | Rendering starts, but deterministic storage-buffer disposal and program-memory diagnostics are absent |
-| r184 | Public TSL storage atomics and `modelWorldMatrixInverse`, plus `BufferAttribute.dispose()` and renderer program-memory diagnostics | First release satisfying parallel sorting, transformed SH rendering, diagnostics, and deterministic cleanup |
+| r184 | Public TSL storage atomics, `IndirectStorageBufferAttribute`, indexed indirect geometry, and `modelWorldMatrixInverse`, plus `BufferAttribute.dispose()` and renderer program-memory diagnostics | First release satisfying parallel sorting, stable GPU compaction, transformed SH rendering, diagnostics, and deterministic cleanup |
 | r185 | Current pinned development version | Fully accepted |
 
 Primary sources:
@@ -31,7 +31,7 @@ Primary sources:
 
 ## Runtime verification
 
-The same nine Playwright cases were run against the official r184 and r185 npm
+The same 13 Playwright cases were run against the official r184 and r185 npm
 artifacts in Headless Chrome with WebGPU enabled. Both runs passed:
 
 - internal synthetic no-SH and SH SOG rendering on WebGPU;
@@ -42,7 +42,9 @@ artifacts in Headless Chrome with WebGPU enabled. Both runs passed:
   and 195,099-Gaussian Lion SH2 snapshots on both backends;
 - local-space SH evaluation for a rotated object and top-to-bottom WebGL center
   indexing before Worker sorting;
-- known-value WebP data decoding.
+- known-value WebP data decoding;
+- stable 4.88M Lion-grid contribution compaction, exact reason counters,
+  indexed-indirect drawing, and the culling on/off profiler scenario.
 
 The r183 audit was intentionally treated as a negative boundary test. The scene
 could render, but storage attributes lacked the public disposal event API and

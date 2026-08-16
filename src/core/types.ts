@@ -107,6 +107,14 @@ export interface SOGPrepareOptions {
   readonly signal?: AbortSignal;
 }
 
+export interface SOGContributionCullingStats {
+  readonly submitted: number;
+  readonly visible: number;
+  readonly behindOrAlpha: number;
+  readonly outsideFrustum: number;
+  readonly lowContribution: number;
+}
+
 export interface SOGRenderDiagnostics {
   backend: SOGBackendKind | null;
   radixBackend: SOGRadixBackendKind | null;
@@ -123,6 +131,10 @@ export interface SOGRenderDiagnostics {
   projectionRefreshDurationMs: number;
   projectionRefreshCount: number;
   projectedCacheEnabled: boolean;
+  contributionCullingEnabled: boolean;
+  contributionCullThreshold: number;
+  cullingStats: SOGContributionCullingStats | null;
+  cullingStatsReadbackCount: number;
   instanceTransformCount: number;
   readbackCount: number;
   orderUploadCount: number;

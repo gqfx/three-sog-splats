@@ -11,6 +11,7 @@ import {
   PerspectiveCamera,
   RGBAFormat,
   Texture,
+  Vector2,
   Vector3,
 } from 'three/webgpu';
 import type { Camera, WebGPURenderer } from 'three/webgpu';
@@ -24,6 +25,7 @@ import type {
   SOGPrepareOptions,
   SOGRenderDiagnostics,
   SOGBackendKind,
+  SOGContributionCullingStats,
 } from '../core/types.js';
 import type { SOGResource } from '../resource/SOGResource.js';
 import { getCachedCenters } from './centers.js';
@@ -34,6 +36,7 @@ import {
 import type { SOGMaterialTextures } from './material.js';
 import { SOGRenderStore } from './SOGRenderStore.js';
 import { SOGWebGPUCache } from './SOGWebGPUCache.js';
+import { DEFAULT_CONTRIBUTION_CULL_THRESHOLD } from './contribution.js';
 import { GpuRadixSorter } from './sort/GpuRadixSorter.js';
 import { WebGLSortBackend } from './sort/WebGLSortBackend.js';
 
@@ -123,6 +126,8 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
   #matrixKey = '';
   #projectionKey = '';
   #instanceTransforms: Matrix4[] = [new Matrix4()];
+  #contributionCullingEnabled = true;
+  #contributionCullThreshold = DEFAULT_CONTRIBUTION_CULL_THRESHOLD;
   #firstFrameStartedAt: number | null = null;
   #firstFrameMemory: { textures: number; programs: number } | null = null;
 
@@ -151,6 +156,10 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
       projectionRefreshDurationMs: 0,
       projectionRefreshCount: 0,
       projectedCacheEnabled: false,
+      contributionCullingEnabled: false,
+      contributionCullThreshold: DEFAULT_CONTRIBUTION_CULL_THRESHOLD,
+      cullingStats: null,
+      cullingStatsReadbackCount: 0,
       instanceTransformCount: 1,
       readbackCount: 0,
       orderUploadCount: 0,
@@ -173,6 +182,36 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
 
   get activeRanges(): readonly SOGActiveRange[] {
     return this.#store ? [this.#store.activeRange] : [];
+  }
+
+  setContributionCullingEnabled(enabled: boolean): this {
+    this.#contributionCullingEnabled = enabled;
+    this.#diagnostics.contributionCullingEnabled = enabled && !!this.#store?.webgpuCache;
+    this.#diagnostics.cullingStats = null;
+    this.#projectionKey = '';
+    return this;
+  }
+
+  setContributionCullThreshold(threshold: number): this {
+    if (!Number.isFinite(threshold) || threshold < 0) {
+      throw new RangeError('SOG contribution cull threshold must be a finite non-negative number.');
+    }
+    this.#contributionCullThreshold = threshold;
+    this.#diagnostics.contributionCullThreshold = threshold;
+    this.#diagnostics.cullingStats = null;
+    this.#projectionKey = '';
+    return this;
+  }
+
+  async readContributionCullingStatsAsync(): Promise<SOGContributionCullingStats | null> {
+    const renderer = this.#renderer;
+    const cache = this.#store?.webgpuCache;
+    if (!renderer || !cache || this.#state !== 'ready') return null;
+    const stats = await cache.readCullingStatsAsync(renderer);
+    this.#diagnostics.cullingStats = stats;
+    this.#diagnostics.cullingStatsReadbackCount += 1;
+    this.#diagnostics.readbackCount += 1;
+    return stats;
   }
 
   /**
@@ -334,8 +373,14 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
             materialTextures,
             this.#source.meta,
             this.#instanceTransforms,
+            gpuSorter.orderAttribute,
           );
           cleanup.defer(() => webgpuCache?.dispose());
+          webgpuCache.updateCulling(
+            this.#contributionCullingEnabled,
+            this.#contributionCullThreshold,
+            this.#source.count * this.#instanceTransforms.length,
+          );
           const decodeStartedAt = now();
           await webgpuCache.decodeAsync(renderer);
           this.#diagnostics.staticDecodeDurationMs = now() - decodeStartedAt;
@@ -343,6 +388,7 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
           await webgpuCache.warmProjectionAsync(renderer);
           this.#diagnostics.projectionWarmupDurationMs = now() - projectionWarmupStartedAt;
           this.#diagnostics.projectedCacheEnabled = true;
+          this.#diagnostics.contributionCullingEnabled = this.#contributionCullingEnabled;
         }
       } else {
         if (this.#instanceTransforms.length > 1) {
@@ -380,6 +426,7 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
         backend === 'webgl' ? webglSorter?.orderAttribute : undefined,
         Math.exp(Math.max(...this.#source.meta.scales.codebook.filter(Number.isFinite))),
       );
+      if (webgpuCache) geometry.setIndirect(webgpuCache.indirectAttribute);
       if (this.#instanceTransforms.length > 1 && geometry.boundingBox) {
         const sourceBounds = geometry.boundingBox.clone();
         geometry.boundingBox.makeEmpty();
@@ -515,15 +562,35 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
       }
     }
     if (store.webgpuCache) {
+      const viewport = typeof renderer.getDrawingBufferSize === 'function'
+        ? renderer.getDrawingBufferSize(new Vector2())
+        : new Vector2(1, 1);
+      const drawLimit = Math.max(0, Math.min(
+        store.webgpuCache.logicalCount,
+        Math.floor(this.geometry.instanceCount),
+      ));
       const projectionKey = `${viewKey}|${camera.projectionMatrix.elements
-        .map((value) => value.toFixed(7)).join(',')}`;
+        .map((value) => value.toFixed(7)).join(',')}|${viewport.x}x${viewport.y}`
+        + `|${drawLimit}|${this.#contributionCullingEnabled ? 1 : 0}`
+        + `|${this.#contributionCullThreshold}`;
       if (projectionKey !== this.#projectionKey) {
         this.#projectionKey = projectionKey;
         const localCameraPosition = new Vector3()
           .setFromMatrixPosition(camera.matrixWorld)
           .applyMatrix4(this.matrixWorld.clone().invert());
         const viewProjectionModel = new Matrix4().multiplyMatrices(camera.projectionMatrix, view);
-        store.webgpuCache.updateCamera(viewProjectionModel, localCameraPosition);
+        store.webgpuCache.updateCamera(
+          viewProjectionModel,
+          localCameraPosition,
+          viewport.x,
+          viewport.y,
+        );
+        store.webgpuCache.updateCulling(
+          this.#contributionCullingEnabled,
+          this.#contributionCullThreshold,
+          drawLimit,
+        );
+        this.#diagnostics.cullingStats = null;
         const startedAt = now();
         store.webgpuCache.project(renderer);
         this.#diagnostics.projectionRefreshDurationMs = now() - startedAt;

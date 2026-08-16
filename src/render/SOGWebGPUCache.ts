@@ -30,6 +30,7 @@ import {
   vec4,
 } from 'three/tsl';
 import type { SOGMetaV2 } from '../core/types.js';
+import type { SOGContributionCullingStats } from '../core/types.js';
 import {
   codebookValue,
   decodeCenter,
@@ -40,6 +41,7 @@ import {
   texelForIndex,
 } from './material.js';
 import type { SOGMaterialTextures, SOGProjectedBuffers } from './material.js';
+import { SOGContributionCuller } from './SOGContributionCuller.js';
 
 const WORKGROUP_SIZE = 256;
 
@@ -78,6 +80,7 @@ export class SOGWebGPUCache {
   readonly #projectedCenters: StorageBufferAttribute;
   readonly #projectedEllipses: StorageBufferAttribute;
   readonly #projectedColors: StorageBufferAttribute;
+  readonly #culler: SOGContributionCuller;
   readonly #decodeNodes: ComputeNode[];
   readonly #projectionNode: ComputeNode;
   readonly #viewProjectionModel = uniform(new Matrix4());
@@ -88,6 +91,7 @@ export class SOGWebGPUCache {
     textures: SOGMaterialTextures,
     meta: SOGMetaV2,
     instanceTransforms: readonly Matrix4[],
+    orderAttribute: StorageBufferAttribute,
   ) {
     this.sourceCount = meta.count;
     this.instanceCount = instanceTransforms.length;
@@ -118,19 +122,29 @@ export class SOGWebGPUCache {
     this.#projectedCenters = new StorageBufferAttribute(new Float32Array(logicalCapacity * 4), 4);
     this.#projectedEllipses = new StorageBufferAttribute(new Uint32Array(logicalCapacity * 2), 2);
     this.#projectedColors = new StorageBufferAttribute(new Uint32Array(logicalCapacity), 1);
-    this.projected = {
+    const projectedInputs = {
       centers: this.#projectedCenters,
       ellipses: this.#projectedEllipses,
       colors: this.#projectedColors,
       sourceCount: this.sourceCount,
       logicalCount: this.logicalCount,
     };
+    this.#culler = new SOGContributionCuller(projectedInputs, orderAttribute);
+    this.projected = {
+      ...projectedInputs,
+      visibleIndices: this.#culler.visibleIndices,
+    };
     this.#decodeNodes = this.#buildDecodeNodes(textures, meta, coefficientCount);
     this.#projectionNode = this.#buildProjectionNode(meta, coefficientCount);
     this.allocatedBytes = sourceCapacity * (4 * 4 + 4 * 4 + 2 * 4)
       + coefficientCapacity * 4 * 4
       + Math.max(1, this.instanceCount) * 16 * 4 * 2
-      + logicalCapacity * (4 * 4 + 2 * 4 + 4);
+      + logicalCapacity * (4 * 4 + 2 * 4 + 4)
+      + this.#culler.allocatedBytes;
+  }
+
+  get indirectAttribute(): SOGContributionCuller['indirectAttribute'] {
+    return this.#culler.indirectAttribute;
   }
 
   async decodeAsync(renderer: WebGPURenderer): Promise<void> {
@@ -138,16 +152,40 @@ export class SOGWebGPUCache {
   }
 
   async warmProjectionAsync(renderer: WebGPURenderer): Promise<void> {
-    if (this.logicalCount > 0) await renderer.computeAsync(this.#projectionNode);
+    if (this.logicalCount > 0) {
+      await renderer.computeAsync(this.#projectionNode);
+      await this.#culler.computeAsync(renderer);
+    }
   }
 
-  updateCamera(viewProjectionModel: Matrix4, localCameraPosition: Vector3): void {
+  updateCamera(
+    viewProjectionModel: Matrix4,
+    localCameraPosition: Vector3,
+    viewportWidth: number,
+    viewportHeight: number,
+  ): void {
     this.#viewProjectionModel.value.copy(viewProjectionModel);
     this.#localCameraPosition.value.copy(localCameraPosition);
+    this.#culler.setViewport(viewportWidth, viewportHeight);
+  }
+
+  updateCulling(enabled: boolean, threshold: number, drawLimit: number): void {
+    this.#culler.setEnabled(enabled);
+    this.#culler.setThreshold(threshold);
+    this.#culler.setDrawLimit(drawLimit);
   }
 
   project(renderer: WebGPURenderer): void {
-    if (this.logicalCount > 0) renderer.compute(this.#projectionNode);
+    if (this.logicalCount > 0) {
+      renderer.compute(this.#projectionNode);
+      this.#culler.compute(renderer);
+    }
+  }
+
+  async readCullingStatsAsync(
+    renderer: WebGPURenderer,
+  ): Promise<SOGContributionCullingStats> {
+    return this.#culler.readStatsAsync(renderer);
   }
 
   dispose(): void {
@@ -155,6 +193,7 @@ export class SOGWebGPUCache {
     this.#disposed = true;
     for (const node of this.#decodeNodes) node.dispose();
     this.#projectionNode.dispose();
+    this.#culler.dispose();
     this.#centers.dispose();
     this.#shapes.dispose();
     this.#sourceInfo.dispose();

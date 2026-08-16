@@ -61,6 +61,11 @@ a:hover { text-decoration: underline; }
   font-variant-numeric: tabular-nums;
 }
 
+#culling-summary {
+  color: #92b9ff !important;
+  font-variant-numeric: tabular-nums;
+}
+
 #analysis-summary {
   max-width: 720px;
   color: #f1c77d !important;
@@ -93,6 +98,7 @@ a:hover { text-decoration: underline; }
 }
 
 #controls select,
+#controls input[type='number'],
 #controls button {
   width: 100%;
   padding: 7px 8px;
@@ -100,6 +106,17 @@ a:hover { text-decoration: underline; }
   border-radius: 3px;
   color: #fff;
   background: #292c34;
+}
+
+#controls .check-control {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+#controls input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
 }
 
 #controls button {

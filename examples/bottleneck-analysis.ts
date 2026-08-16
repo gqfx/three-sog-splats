@@ -13,6 +13,9 @@ export interface BottleneckScenario {
   readonly drawCalls: number;
   readonly triangles: number;
   readonly vertexInvocations: number;
+  readonly cullingEnabled?: boolean;
+  readonly cullingSubmitted?: number | null;
+  readonly cullingVisible?: number | null;
 }
 
 export interface BottleneckCameraUpdateMeasurement {
@@ -28,6 +31,7 @@ export interface BottleneckFinding {
   readonly stage:
     | 'cached-screen-space-fetch'
     | 'fragment-blending-and-overdraw'
+    | 'contribution-culling'
     | 'camera-change-sort-and-projection'
     | 'fixed-render-overhead'
     | 'cpu-command-submission';
@@ -78,6 +82,7 @@ export function deriveBottleneckFindings(
   const halfResolution = scenario(scenarios, 'half-resolution');
   const quarterResolution = scenario(scenarios, 'quarter-resolution');
   const quarterScale = scenario(scenarios, 'quarter-scale');
+  const noContributionCulling = scenario(scenarios, 'full-no-contribution-culling');
   if (!empty || !full) {
     return {
       findings: [],
@@ -163,6 +168,20 @@ export function deriveBottleneckFindings(
     evidence: `Submitting the full-scene frame took ${rounded(full.cpuSubmitMedianMs)} ms on the CPU, excluding GPU execution.`,
   });
 
+  if (noContributionCulling) {
+    const culledGpu = full.gpuRenderMedianMs ?? full.gpuCompletionMedianMs;
+    const uncullGpu = noContributionCulling.gpuRenderMedianMs
+      ?? noContributionCulling.gpuCompletionMedianMs;
+    const visible = full.cullingVisible ?? full.instanceCount;
+    const submitted = full.cullingSubmitted ?? full.instanceCount;
+    findings.push({
+      stage: 'contribution-culling',
+      impactMs: rounded(Math.max(0, uncullGpu - culledGpu)),
+      conditional: false,
+      evidence: `Stable GPU contribution compaction submitted ${visible.toLocaleString()} of ${submitted.toLocaleString()} logical splats. The same full-resolution view took ${rounded(culledGpu)} ms with culling and ${rounded(uncullGpu)} ms with culling disabled.`,
+    });
+  }
+
   if (cameraUpdate?.gpuComputeMedianMs !== null && cameraUpdate?.gpuComputeMedianMs !== undefined) {
     findings.push({
       stage: 'camera-change-sort-and-projection',
@@ -175,11 +194,19 @@ export function deriveBottleneckFindings(
   }
 
   findings.sort((left, right) => right.impactMs - left.impactMs);
-  const primary = findings.find((finding) => !finding.conditional && finding.impactMs > 0)
+  const cullingSaving = findings.find((finding) => finding.stage === 'contribution-culling');
+  const primary = findings.find((finding) => (
+    !finding.conditional
+    && finding.stage !== 'contribution-culling'
+    && finding.impactMs > 0
+  ))
     ?? findings[0];
   const movingUpdate = findings.find((finding) => finding.stage === 'camera-change-sort-and-projection');
+  const primaryLabel = cullingSaving && cullingSaving.impactMs > 0
+    ? 'Primary remaining stationary bottleneck'
+    : 'Primary stationary bottleneck';
   const summary = primary
-    ? `Primary stationary bottleneck: ${primary.stage} (~${primary.impactMs} ms proxy impact).${movingUpdate ? ` Camera motion additionally ${cameraUpdate?.includesProjectionRefresh ? 'refreshes sort/projection caches' : 'runs radix sort'} (~${movingUpdate.impactMs} ms GPU compute).` : ''}`
+    ? `${cullingSaving && cullingSaving.impactMs > 0 ? `Contribution culling saves ~${cullingSaving.impactMs} ms in the full-view A/B. ` : ''}${primaryLabel}: ${primary.stage} (~${primary.impactMs} ms proxy impact).${movingUpdate ? ` Camera motion additionally ${cameraUpdate?.includesProjectionRefresh ? 'refreshes sort/projection caches' : 'runs radix sort'} (~${movingUpdate.impactMs} ms GPU compute).` : ''}`
     : 'No dominant stage could be derived from the available timing samples.';
 
   return { findings, summary };

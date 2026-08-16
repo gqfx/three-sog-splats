@@ -4,13 +4,15 @@ const chromeExecutable = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
   ?? (process.platform === 'darwin'
     ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
     : undefined);
+const testPort = process.env.PLAYWRIGHT_PORT ?? '4173';
+const testBaseUrl = `http://127.0.0.1:${testPort}`;
 
 export default defineConfig({
   testDir: './tests/browser',
   timeout: 30_000,
   snapshotPathTemplate: '{testDir}/{testFilePath}-snapshots/{arg}{ext}',
   use: {
-    baseURL: 'http://127.0.0.1:4173',
+    baseURL: testBaseUrl,
     browserName: 'chromium',
     headless: true,
     viewport: { width: 960, height: 640 },
@@ -20,8 +22,8 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: 'npm run example -- --host 127.0.0.1',
-    url: 'http://127.0.0.1:4173',
+    command: `npm run example -- --host 127.0.0.1 --port ${testPort}`,
+    url: testBaseUrl,
     reuseExistingServer: true,
   },
 });

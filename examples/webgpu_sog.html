@@ -15,6 +15,7 @@
       </div>
       <small id="status">Initializing renderer…</small>
       <small id="performance-summary">Measuring frame rate…</small>
+      <small id="culling-summary">Contribution culling telemetry is not available yet.</small>
       <small id="analysis-summary">Run the controlled profiler to identify the slow stage.</small>
       <small id="license"></small>
     </div>
@@ -36,6 +37,15 @@
           <option value="webgl">WebGL fallback</option>
         </select>
       </label>
+      <label class="check-control">
+        <input id="contribution-culling" type="checkbox" checked />
+        Contribution culling
+      </label>
+      <label>
+        Minimum contribution
+        <input id="contribution-threshold" type="number" min="0" step="0.5" value="1" />
+      </label>
+      <button id="read-culling" type="button" disabled>Read culling telemetry</button>
       <button id="motion" type="button">Start motion test</button>
       <button id="analyze" type="button" disabled>Analyze bottleneck</button>
     </section>

@@ -350,6 +350,7 @@ test('controlled profiler isolates cached rendering, resolution, and camera-upda
   expect(result.analysis?.scenarios.map((scenario) => scenario.id)).toEqual(expect.arrayContaining([
     'empty',
     'full',
+    'full-no-contribution-culling',
     'half-resolution',
     'quarter-resolution',
     'quarter-scale',
@@ -357,10 +358,16 @@ test('controlled profiler isolates cached rendering, resolution, and camera-upda
   const full = result.analysis?.scenarios.find((scenario) => scenario.id === 'full');
   expect(full?.instanceCount).toBe(116_374);
   expect(full?.drawCalls).toBeGreaterThan(0);
-  expect(full?.triangles).toBeGreaterThan(116_374 * 2);
+  expect(full?.cullingSubmitted).toBe(116_374);
+  expect(full?.cullingVisible).toBeGreaterThan(0);
+  expect(full?.cullingVisible).toBeLessThanOrEqual(116_374);
+  expect(full?.triangles).toBe((full?.cullingVisible ?? 0) * 2);
   expect(result.analysis?.findings.length).toBeGreaterThan(0);
   expect(result.analysis?.findings.some((finding) => (
     finding.stage === 'cached-screen-space-fetch'
+  ))).toBe(true);
+  expect(result.analysis?.findings.some((finding) => (
+    finding.stage === 'contribution-culling'
   ))).toBe(true);
   expect(result.analysis?.cameraUpdate?.computePasses).toBeGreaterThan(0);
   await expect(page.getByRole('button', { name: 'Analyze bottleneck' })).toBeEnabled();
@@ -404,6 +411,31 @@ test('builds the 4.88M Lion grid from one downloaded and prepared source', async
   expect(snapshot.performance?.projectionRefreshCount).toBeGreaterThan(0);
   expect(snapshot.resources.filter((url) => url.endsWith('/lion.sog'))).toHaveLength(1);
   expect(snapshot.resources.some((url) => /lion-grid-5m\.sog/.test(url))).toBe(false);
+
+  await page.getByRole('button', { name: 'Read culling telemetry' }).click();
+  await page.waitForFunction(() => window.__THREE_SOG_EXAMPLE__.cullingStats !== null);
+  const culled = await page.evaluate(() => window.__THREE_SOG_EXAMPLE__.cullingStats!);
+  expect(culled.submitted).toBe(4_877_475);
+  expect(culled.visible).toBeGreaterThan(0);
+  expect(culled.visible).toBeLessThan(culled.submitted);
+  expect(
+    culled.visible + culled.behindOrAlpha + culled.outsideFrustum + culled.lowContribution,
+  ).toBe(culled.submitted);
+
+  await page.getByRole('checkbox', { name: 'Contribution culling' }).uncheck();
+  await page.waitForFunction(() => window.__THREE_SOG_EXAMPLE__.cullingStats === null);
+  await page.waitForTimeout(250);
+  await page.getByRole('button', { name: 'Read culling telemetry' }).click();
+  await page.waitForFunction(() => window.__THREE_SOG_EXAMPLE__.cullingStats !== null);
+  const uncull = await page.evaluate(() => window.__THREE_SOG_EXAMPLE__.cullingStats!);
+  expect(uncull).toEqual({
+    submitted: 4_877_475,
+    visible: 4_877_475,
+    behindOrAlpha: 0,
+    outsideFrustum: 0,
+    lowContribution: 0,
+  });
+  await page.getByRole('checkbox', { name: 'Contribution culling' }).check();
   expect(errors).toEqual([]);
 });
 

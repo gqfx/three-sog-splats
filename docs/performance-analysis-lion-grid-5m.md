@@ -32,27 +32,43 @@ have per-copy cache entries.
 6. Projected caching is adaptive. It is enabled for batched copies and resources
    up to one million unique splats. A single larger unique resource keeps the
    indexed single-pass path to avoid hundreds of megabytes of unhelpful cache.
+7. Camera/model/viewport changes classify the sorted logical stream using
+   center alpha, camera/frustum visibility, and opacity-weighted projected
+   covariance area. Workgroup counts are hierarchically scanned and survivors
+   are scattered as a stable subsequence.
+8. A five-word indexed-indirect command draws only the GPU-produced survivor
+   count. Stationary frames run neither projection nor culling compute.
 
 ## Controlled result
 
-| Probe | Instances | DPR | Scale | Median GPU render | CPU submit | Draw calls | Triangles |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Empty | 0 | 2 | 1 | 1.4 ms proxy | 0.1 ms | 1 | 1 |
-| Ramp | 100,000 | 2 | 1 | 6.9 ms | 0.1 ms | 2 | 200,001 |
-| Ramp | 500,000 | 2 | 1 | 35.8 ms | 0.4 ms | 2 | 1,000,001 |
-| Ramp | 1,000,000 | 2 | 1 | 47.4 ms | 0.4 ms | 2 | 2,000,001 |
-| Ramp | 2,000,000 | 2 | 1 | 107.2 ms | 0.5 ms | 2 | 4,000,001 |
-| Full grid | 4,877,475 | 2 | 1 | 138.3 ms | 0.6 ms | 2 | 9,754,951 |
-| Half DPR | 4,877,475 | 1 | 1 | 125.0 ms | 0.5 ms | 2 | 9,754,951 |
-| Quarter DPR | 4,877,475 | 0.5 | 1 | 50.9 ms | 0.4 ms | 2 | 9,754,951 |
-| Quarter scale | 4,877,475 | 2 | 0.25 | 52.4 ms | 0.3 ms | 2 | 9,754,951 |
+| Probe | Logical | GPU-visible | Median GPU render | P95 | Actual splat triangles |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Empty | 0 | 0 | 1.0 ms proxy | — | 0 |
+| Ramp | 100,000 | 11,629 | 2.1 ms | 4.7 ms | 23,258 |
+| Ramp | 500,000 | 45,495 | 4.8 ms | 7.7 ms | 90,990 |
+| Ramp | 1,000,000 | 86,668 | 8.7 ms | 9.6 ms | 173,336 |
+| Ramp | 2,000,000 | 168,830 | 10.7 ms | 17.8 ms | 337,660 |
+| Full grid, threshold 1 | 4,877,475 | 370,180 | 21.7 ms | 26.4 ms | 740,360 |
+| Full grid, culling disabled | 4,877,475 | 4,877,475 | 130.9 ms | 166.8 ms | 9,754,950 |
+| Half DPR, area-scaled threshold | 4,877,475 | 370,180 | 18.5 ms | 29.2 ms | 740,360 |
+| Quarter DPR, area-scaled threshold | 4,877,475 | 370,180 | 9.6 ms | 10.0 ms | 740,360 |
+| Quarter scale, area-scaled threshold | 4,877,475 | 350,673 | 11.9 ms | 14.2 ms | 701,346 |
 
-The live loop stabilized around 9 FPS. Three reported about 207.9 MB of tracked
-renderer memory; library diagnostics accounted for about 163.5 MB. The extra
-memory is the deliberate projected cache, not 25 decompressed source copies.
+The live loop reached the page's 60 FPS display ceiling (59.7 FPS sampled).
+Three reported about 227.8 MB of tracked renderer memory; library diagnostics
+accounted for 183,354,404 bytes. The additional roughly 19.8 MB over the prior
+cache is the visible-index and compact block/scan storage, not decompressed
+source copies.
 
-The camera-change probe measured 12.4 ms median GPU compute across the shared
-radix sort and the 4,877,475-entry projection/SH refresh. Stationary frames
+At the conservative default threshold of 1, explicit telemetry reported
+370,180 visible splats, 497,483 camera/alpha rejections, zero off-screen
+rejections for the fitted grid, and 4,009,812 low-contribution rejections. The
+categories sum exactly to 4,877,475. The same-view profiler measured 21.7 ms
+with culling and 130.9 ms with culling disabled, a 109.2 ms median GPU saving.
+
+The camera-change probe measured 11.7 ms median GPU compute across the shared
+radix sort, 4,877,475-entry projection/SH refresh, classification, scan, and
+stable scatter. Stationary frames
 reported zero compute passes. Preparation-time static dequantization took about
 4.4 ms and projection-pipeline warmup about 19.5 ms in the sampled run; archive
 and WebP decode remain one-time loader work.
@@ -61,18 +77,19 @@ and WebP decode remain one-time loader work.
 
 | Metric | Before | After | Change |
 | --- | ---: | ---: | ---: |
-| Live FPS | about 5.1 | about 9.2 | about +80% |
-| Full GPU render | 247.9–252.0 ms | 137–138 ms | about −45% |
+| Live FPS | about 5.1 | 59.7 (display ceiling) | about 11.7× |
+| Full GPU render | 247.9–252.0 ms | 21.7 ms | about −91% |
 | Draw calls | 51 | 2 | −96% |
-| Triangles | 19,509,901 | 9,754,951 | −50% |
-| Estimated splat vertex invocations | 58,529,700 | 19,509,900 | −67% |
-| Resolution-independent proxy | 139.1 ms | 72.0 ms | −48% |
-| Fragment/overdraw proxy | 106.7 ms | 71.7 ms | −33% |
-| Camera-change compute | 0.3 ms sort only | 12.4 ms sort + projection/SH | conditional tradeoff |
-| Tracked renderer memory | 55.1 MB | 207.9 MB | +152.8 MB cache |
+| Actual splat triangles | 19,509,900 | 740,360 | −96.2% |
+| Estimated splat vertex invocations | 58,529,700 | 1,480,720 | −97.5% |
+| Resolution-independent proxy | 139.1 ms | 11.0 ms | −92.1% |
+| Fragment/overdraw proxy | 106.7 ms | 10.4 ms | −90.3% |
+| Camera-change compute | 0.3 ms sort only | 11.7 ms sort + projection/SH + cull/compact | conditional tradeoff |
+| Tracked renderer memory | 55.1 MB | 227.8 MB | +172.7 MB caches/compaction |
 
 This confirms the original diagnosis: decompression was never a per-frame
-cost. The optimization moves shader dequantization and projection out of the
-stationary frame in exchange for a bounded cache and more work only when the
-view changes. The remaining roughly equal bottlenecks are cached per-instance
-fetch/quad expansion and fragment blending/overdraw.
+cost. Static decode, projection, and stable compaction occur only when their
+inputs change; the stationary indexed-indirect draw now avoids low-contribution
+vertex and fragment work. The remaining measured costs are roughly balanced
+between cached screen-space fetch/quad expansion (11.0 ms proxy) and
+fragment/blending work (10.4 ms proxy).

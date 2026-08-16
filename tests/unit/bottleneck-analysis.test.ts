@@ -81,6 +81,20 @@ describe('deriveBottleneckFindings', () => {
     expect(result.summary).toContain('Camera motion additionally refreshes sort/projection caches');
   });
 
+  it('reports the measured contribution-culling A/B saving', () => {
+    const result = deriveBottleneckFindings([
+      probe('empty', 0.4),
+      probe('full', 8, { cullingSubmitted: 5_000_000, cullingVisible: 400_000 }),
+      probe('full-no-contribution-culling', 110),
+    ], null);
+
+    expect(result.findings).toContainEqual(expect.objectContaining({
+      stage: 'contribution-culling',
+      impactMs: 102,
+    }));
+    expect(result.summary).toContain('Contribution culling saves ~102 ms');
+  });
+
   it('falls back to completion latency when the empty-pass timestamp is invalid', () => {
     const result = deriveBottleneckFindings([
       probe('empty', 0.4, { gpuRenderMedianMs: null, gpuCompletionMedianMs: 2.5 }),

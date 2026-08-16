@@ -15,6 +15,10 @@ function fakeRenderer(): WebGPURenderer {
     hasFeature: vi.fn(() => false),
     compute: vi.fn(),
     computeAsync: vi.fn(async () => {}),
+    getDrawingBufferSize: vi.fn((target) => target.set(1280, 720)),
+    getArrayBufferAsync: vi.fn(async () => (
+      new Uint32Array([8, 4, 1, 1, 2]).buffer
+    )),
     info: { memory: { textures: 6, programs: 2 } },
   } as unknown as WebGPURenderer;
 }
@@ -89,11 +93,27 @@ describe('SOGGaussianSplatMesh lifecycle', () => {
     await mesh.prepare(fakeRenderer());
     expect(mesh.geometry.instanceCount).toBe(8);
     expect(mesh.geometry.index?.count).toBe(6);
+    expect(mesh.geometry.getIndirect()?.isIndirectStorageBufferAttribute).toBe(true);
     expect(mesh.material.forceSinglePass).toBe(true);
     expect(mesh.diagnostics.activeSplatCount).toBe(8);
     expect(mesh.diagnostics.instanceTransformCount).toBe(2);
     expect(mesh.diagnostics.projectedCacheEnabled).toBe(true);
+    expect(mesh.diagnostics.contributionCullingEnabled).toBe(true);
+    expect(mesh.diagnostics.contributionCullThreshold).toBe(1);
     expect(mesh.diagnostics.staticDecodeDurationMs).toBeGreaterThanOrEqual(0);
+    mesh.setContributionCullThreshold(1.5).setContributionCullingEnabled(false);
+    expect(mesh.diagnostics.contributionCullThreshold).toBe(1.5);
+    expect(mesh.diagnostics.contributionCullingEnabled).toBe(false);
+    await expect(mesh.readContributionCullingStatsAsync()).resolves.toEqual({
+      submitted: 8,
+      visible: 4,
+      behindOrAlpha: 1,
+      outsideFrustum: 1,
+      lowContribution: 2,
+    });
+    expect(mesh.diagnostics.readbackCount).toBe(1);
+    expect(mesh.diagnostics.cullingStatsReadbackCount).toBe(1);
+    expect(() => mesh.setContributionCullThreshold(-1)).toThrow(/non-negative/);
     expect(() => mesh.setInstanceTransforms([new Matrix4()])).toThrow(/before prepare/);
     mesh.dispose();
     source.dispose();

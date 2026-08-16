@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   DataTexture,
+  IndirectStorageBufferAttribute,
   StorageBufferAttribute,
   WebGPURenderer,
 } from 'three/webgpu';
@@ -27,6 +28,7 @@ describe('Three.js r184-r185 public API contract', () => {
     expect(WebGPURenderer).toBeTypeOf('function');
     expect(DataTexture).toBeTypeOf('function');
     expect(StorageBufferAttribute).toBeTypeOf('function');
+    expect(IndirectStorageBufferAttribute).toBeTypeOf('function');
     expect(Fn).toBeTypeOf('function');
     expect(array).toBeTypeOf('function');
     expect(storage).toBeTypeOf('function');

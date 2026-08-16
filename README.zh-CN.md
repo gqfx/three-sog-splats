@@ -64,6 +64,11 @@ buffer 或 order。通用路径采用 4 位 Portable backend；只有适配器�
 OneSweep。自定义、未知、Apple、移动端或身份有歧义的设备均回退 Portable；相同
 key 的 splat 保持源顺序。
 
+启用投影缓存的 WebGPU mesh 还会在光栅化前按 PlayCanvas 同类的“不透明度 ×
+屏幕投影面积”指标分类 splat；相机后方、零 alpha、屏外和低贡献项会按原顺序
+稳定压紧到 GPU 可见索引，并由 GPU 写入的 indexed-indirect 参数只绘制存活项。
+完整源数据仍常驻 GPU，视角变化后可重新出现；保守默认贡献阈值为 `1`。
+
 同一个 `SOGLoader` 发起的等价并发请求会合并。每个调用者得到独立资源租约；
 取消一个调用者不会影响其他消费者，只有最后一个消费者退出才中止共享操作。
 
@@ -78,7 +83,10 @@ key 的 splat 保持源顺序。
   clone 和幂等 dispose。
 - `SOGGaussianSplatMesh`：普通 Three.js Mesh，支持显式异步 `prepare()`、场景
   transform、在 prepare 前通过 `setInstanceTransforms()` 批量配置平移副本、
-  单个全资源 active range、渲染诊断和幂等 dispose。
+  单个全资源 active range、通过 `setContributionCullingEnabled()` /
+  `setContributionCullThreshold()` 配置贡献剔除、通过
+  `readContributionCullingStatsAsync()` 显式读取剔除埋点、渲染诊断和幂等
+  dispose。
 - `SOGError`：提供 `ABORTED`、`INVALID_ARCHIVE`、`INVALID_METADATA`、
   `UNSUPPORTED_RENDERER`、`RENDERER_MISMATCH` 等稳定错误码。
 - options、state、metadata、bounds、diagnostics 和 disposal 类型均从包根导出。
@@ -87,6 +95,8 @@ key 的 splat 保持源顺序。
 保留内存和失败阶段。渲染诊断包含 backend、upload/compile/prepare/首帧/sort
 耗时、sort/upload/readback 计数、active count、GPU 分配估算、状态、所选 radix
 backend、舍入后的 radix bits 和选择原因。
+贡献剔除埋点包含 submitted/visible，以及相机后方或 alpha、屏外、低贡献三类
+计数。读取是显式操作并会增加 readback 诊断；正常静止渲染路径不会 GPU 回读。
 
 ## MVP 限制与非目标
 
@@ -119,6 +129,9 @@ DPR 和 backend 对应的排序计时含义。参见[示例说明](./examples/RE
 副本合成一次 draw，逻辑总数为 4,877,475 splats。静态属性只在准备期解量化一次，
 投影与 SH 只在相机/模型变化时刷新；静止帧不运行 compute。仓库和 GPU 都不会保存
 25 份展开后的源数据。
+WebGPU 示例提供贡献剔除开关、阈值和显式埋点按钮；controlled profiler 还会在
+同一视角执行开/关 A/B，并用 GPU survivor 数修正 Three.js 的 CPU 侧 triangle
+估算。
 
 ## 开发验证
 

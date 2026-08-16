@@ -82,14 +82,17 @@ changes refresh packed clip centers, ellipses, and colors in compute. Stationary
 vertices only fetch that cached data. Transparent Gaussian sprites also use one
 DoubleSide pass and four indexed quad vertices.
 
-For the 4,877,475-splat Lion grid at 1280×720 DPR 2, this reduced full GPU render
-from about 248–252 ms to 137–138 ms, draw calls from 51 to 2, triangles from
-19,509,901 to 9,754,951, and the resolution-independent proxy from 139.1 ms to
-about 72 ms. Camera-change sort plus projection refresh measured 12.4 ms and was
-absent on stationary frames. Tracked renderer memory increased from about
-55.1 MB to 207.9 MB. A single five-million-unique-splat resource is not admitted
-to this cache, avoiding roughly 340 MB of extra storage with little benefit in
-the overdraw-dominated synthetic lattice.
+For the 4,877,475-splat Lion grid at 1280×720 DPR 2, stable contribution
+compaction at the conservative threshold of 1 retained 370,180 logical splats
+and drove an indexed-indirect draw containing 740,360 splat triangles. Median
+GPU render measured 21.7 ms versus 130.9 ms with contribution culling disabled;
+the live loop reached its 60 FPS display ceiling. Camera-change sort,
+projection/SH refresh, classification, scan, and stable scatter measured
+11.7 ms and were absent on stationary frames. Tracked renderer memory was about
+227.8 MB, including roughly 19.8 MB for visible indices and compact scan data.
+A single five-million-unique-splat resource is not admitted to the projected
+cache, avoiding hundreds of megabytes of storage with little benefit in the
+overdraw-dominated synthetic lattice.
 
 ### Five-million-splat stress scene
 

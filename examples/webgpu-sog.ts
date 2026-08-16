@@ -16,7 +16,7 @@ import {
 import type { Mesh } from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SOGGaussianSplatMesh, SOGLoader } from '../src/index.js';
-import type { SOGResource } from '../src/index.js';
+import type { SOGContributionCullingStats, SOGResource } from '../src/index.js';
 import {
   deriveBottleneckFindings,
   type BottleneckAnalysis,
@@ -52,6 +52,9 @@ interface FramePerformanceMetrics {
   readonly projectionRefreshDurationMs: number;
   readonly projectionRefreshCount: number;
   readonly projectedCacheEnabled: boolean;
+  readonly contributionCullingEnabled: boolean;
+  readonly contributionCullThreshold: number;
+  readonly cullingStats: SOGContributionCullingStats | null;
   readonly gpuTimestampSupported: boolean;
   readonly latestGpuRenderMs: number | null;
   readonly latestGpuComputeMs: number | null;
@@ -104,11 +107,17 @@ declare global {
         readonly stage: string;
       } | null;
       analysis: BottleneckAnalysis | null;
+      cullingEnabled: boolean;
+      cullingThreshold: number;
+      cullingStats: SOGContributionCullingStats | null;
       motion: 'idle' | 'orbit';
       error: string | null;
       startCameraMotion(): void;
       stopCameraMotion(): void;
       resetPerformance(): void;
+      setContributionCullingEnabled(enabled: boolean): void;
+      setContributionCullThreshold(threshold: number): void;
+      readContributionCullingStats(): Promise<SOGContributionCullingStats | null>;
       runBottleneckAnalysis(): Promise<BottleneckAnalysis>;
     };
   }
@@ -170,13 +179,24 @@ const initialSource: SourceKey = requestedSource === 'sh'
   ? requestedSource
   : 'no-sh';
 const forceWebGL = parameters.get('backend') === 'webgl';
+const initialCullingEnabled = parameters.get('culling') !== 'off';
+const parsedContributionThreshold = Number(parameters.get('contribution'));
+const initialContributionThreshold = parameters.has('contribution')
+  && Number.isFinite(parsedContributionThreshold)
+  && parsedContributionThreshold >= 0
+  ? parsedContributionThreshold
+  : 1;
 const status = document.querySelector<HTMLElement>('#status')!;
 const performanceSummary = document.querySelector<HTMLElement>('#performance-summary')!;
+const cullingSummary = document.querySelector<HTMLElement>('#culling-summary')!;
 const analysisSummary = document.querySelector<HTMLElement>('#analysis-summary')!;
 const license = document.querySelector<HTMLElement>('#license')!;
 const diagnostics = document.querySelector<HTMLElement>('#diagnostics')!;
 const sourceSelect = document.querySelector<HTMLSelectElement>('#source')!;
 const backendSelect = document.querySelector<HTMLSelectElement>('#backend')!;
+const cullingCheckbox = document.querySelector<HTMLInputElement>('#contribution-culling')!;
+const contributionThresholdInput = document.querySelector<HTMLInputElement>('#contribution-threshold')!;
+const readCullingButton = document.querySelector<HTMLButtonElement>('#read-culling')!;
 const motionButton = document.querySelector<HTMLButtonElement>('#motion')!;
 const analysisButton = document.querySelector<HTMLButtonElement>('#analyze')!;
 
@@ -192,11 +212,17 @@ const exampleState: Window['__THREE_SOG_EXAMPLE__'] = window.__THREE_SOG_EXAMPLE
   analysisState: 'idle',
   analysisProgress: null,
   analysis: null,
+  cullingEnabled: initialCullingEnabled,
+  cullingThreshold: initialContributionThreshold,
+  cullingStats: null,
   motion: 'idle',
   error: null,
   startCameraMotion: () => {},
   stopCameraMotion: () => {},
   resetPerformance: () => {},
+  setContributionCullingEnabled: () => {},
+  setContributionCullThreshold: () => {},
+  readContributionCullingStats: async () => null,
   runBottleneckAnalysis: async () => {
     throw new Error('Bottleneck analysis is not initialized yet.');
   },
@@ -204,6 +230,8 @@ const exampleState: Window['__THREE_SOG_EXAMPLE__'] = window.__THREE_SOG_EXAMPLE
 
 sourceSelect.value = initialSource;
 backendSelect.value = forceWebGL ? 'webgl' : 'webgpu';
+cullingCheckbox.checked = initialCullingEnabled;
+contributionThresholdInput.value = String(initialContributionThreshold);
 backendSelect.addEventListener('change', () => {
   const next = new URL(location.href);
   if (backendSelect.value === 'webgl') next.searchParams.set('backend', 'webgl');
@@ -261,6 +289,22 @@ let latestTimestampSample: {
 let lastTimestampResolveAt = 0;
 let timestampResolvePromise: Promise<void> | null = null;
 let analysisPromise: Promise<BottleneckAnalysis> | null = null;
+
+function updateCullingSummary(): void {
+  const meshDiagnostics = currentMesh?.diagnostics;
+  if (!meshDiagnostics?.projectedCacheEnabled) {
+    cullingSummary.textContent = 'Contribution culling unavailable on this render path.';
+    return;
+  }
+  const stats = exampleState.cullingStats;
+  if (!stats) {
+    cullingSummary.textContent = `Contribution culling ${exampleState.cullingEnabled ? 'on' : 'off'} · threshold ${exampleState.cullingThreshold} · read telemetry for exact counts.`;
+    return;
+  }
+  const culled = stats.submitted - stats.visible;
+  const percentage = stats.submitted > 0 ? (culled / stats.submitted) * 100 : 0;
+  cullingSummary.textContent = `${stats.visible.toLocaleString()} visible / ${stats.submitted.toLocaleString()} submitted · ${percentage.toFixed(1)}% culled · camera/alpha ${stats.behindOrAlpha.toLocaleString()} · offscreen ${stats.outsideFrustum.toLocaleString()} · low contribution ${stats.lowContribution.toLocaleString()}`;
+}
 
 function rounded(value: number): number {
   return Math.round(value * 10) / 10;
@@ -362,6 +406,9 @@ function updateFrameMetrics(timestamp: number, cpuSubmitDurationMs: number): voi
     projectionRefreshDurationMs: rounded(renderDiagnostics?.projectionRefreshDurationMs ?? 0),
     projectionRefreshCount: renderDiagnostics?.projectionRefreshCount ?? 0,
     projectedCacheEnabled: renderDiagnostics?.projectedCacheEnabled ?? false,
+    contributionCullingEnabled: renderDiagnostics?.contributionCullingEnabled ?? false,
+    contributionCullThreshold: renderDiagnostics?.contributionCullThreshold ?? 0,
+    cullingStats: renderDiagnostics?.cullingStats ?? null,
     gpuTimestampSupported,
     latestGpuRenderMs: latestTimestampSample?.renderMs ?? null,
     latestGpuComputeMs: latestTimestampSample?.computeMs ?? null,
@@ -369,7 +416,9 @@ function updateFrameMetrics(timestamp: number, cpuSubmitDurationMs: number): voi
       ? rounded(performance.now() - latestTimestampSample.sampledAt)
       : null,
     drawCalls: renderer.info.render.drawCalls,
-    triangles: renderer.info.render.triangles,
+    triangles: renderDiagnostics?.cullingStats
+      ? renderDiagnostics.cullingStats.visible * 2
+      : renderer.info.render.triangles,
     computePasses: renderer.info.compute.frameCalls,
     rendererMemoryBytes: renderer.info.memory.total,
     viewport: {
@@ -391,6 +440,56 @@ function updateFrameMetrics(timestamp: number, cpuSubmitDurationMs: number): voi
     metricsLogAt = timestamp;
   }
 }
+
+function invalidateCullingTelemetry(): void {
+  exampleState.cullingStats = null;
+  updateCullingSummary();
+  resetFrameMetrics();
+}
+
+exampleState.setContributionCullingEnabled = (enabled: boolean): void => {
+  exampleState.cullingEnabled = enabled;
+  cullingCheckbox.checked = enabled;
+  currentMesh?.setContributionCullingEnabled(enabled);
+  const next = new URL(location.href);
+  if (enabled) next.searchParams.delete('culling');
+  else next.searchParams.set('culling', 'off');
+  history.replaceState(null, '', next);
+  invalidateCullingTelemetry();
+};
+
+exampleState.setContributionCullThreshold = (threshold: number): void => {
+  if (!Number.isFinite(threshold) || threshold < 0) return;
+  exampleState.cullingThreshold = threshold;
+  contributionThresholdInput.value = String(threshold);
+  currentMesh?.setContributionCullThreshold(threshold);
+  const next = new URL(location.href);
+  if (threshold === 1) next.searchParams.delete('contribution');
+  else next.searchParams.set('contribution', String(threshold));
+  history.replaceState(null, '', next);
+  invalidateCullingTelemetry();
+};
+
+exampleState.readContributionCullingStats = async (): Promise<SOGContributionCullingStats | null> => {
+  const stats = await currentMesh?.readContributionCullingStatsAsync() ?? null;
+  exampleState.cullingStats = stats;
+  updateCullingSummary();
+  updateDiagnosticsView();
+  return stats;
+};
+
+cullingCheckbox.addEventListener('change', () => {
+  exampleState.setContributionCullingEnabled(cullingCheckbox.checked);
+});
+contributionThresholdInput.addEventListener('input', () => {
+  exampleState.setContributionCullThreshold(Number(contributionThresholdInput.value));
+});
+readCullingButton.addEventListener('click', () => {
+  readCullingButton.disabled = true;
+  void exampleState.readContributionCullingStats().finally(() => {
+    readCullingButton.disabled = !currentMesh?.diagnostics.projectedCacheEnabled;
+  });
+});
 
 function scheduleTimestampSample(timestamp: number): void {
   if (
@@ -543,6 +642,8 @@ interface AnalysisScenarioDefinition {
   readonly pixelRatio: number;
   readonly modelScale: number;
   readonly visible: boolean;
+  readonly cullingEnabled?: boolean;
+  readonly contributionThreshold?: number;
 }
 
 interface AnalysisFrameProbe {
@@ -560,6 +661,9 @@ function setAnalysisControlsDisabled(disabled: boolean): void {
   backendSelect.disabled = disabled;
   motionButton.disabled = disabled;
   analysisButton.disabled = disabled || exampleState.state !== 'ready';
+  cullingCheckbox.disabled = disabled || !currentMesh?.diagnostics.projectedCacheEnabled;
+  contributionThresholdInput.disabled = disabled || !currentMesh?.diagnostics.projectedCacheEnabled;
+  readCullingButton.disabled = disabled || !currentMesh?.diagnostics.projectedCacheEnabled;
 }
 
 function setAnalysisProgress(completed: number, total: number, stage: string): void {
@@ -628,6 +732,10 @@ function configureAnalysisScenario(
   }
   root.scale.copy(originalScale).multiplyScalar(definition.modelScale);
   root.updateWorldMatrix(true, true);
+  currentMesh?.setContributionCullingEnabled(definition.cullingEnabled ?? true);
+  if (definition.contributionThreshold !== undefined) {
+    currentMesh?.setContributionCullThreshold(definition.contributionThreshold);
+  }
 }
 
 async function measureAnalysisScenario(
@@ -640,6 +748,15 @@ async function measureAnalysisScenario(
 ): Promise<BottleneckScenario> {
   configureAnalysisScenario(renderMeshes, root, logicalSplatCount, definition, originalScale);
   await measureAnalysisFrame();
+  const cullingStats = definition.visible
+    ? await currentMesh?.readContributionCullingStatsAsync() ?? null
+    : {
+        submitted: 0,
+        visible: 0,
+        behindOrAlpha: 0,
+        outsideFrustum: 0,
+        lowContribution: 0,
+      };
   const probes: AnalysisFrameProbe[] = [];
   for (let sample = 0; sample < sampleCount; sample += 1) {
     probes.push(await measureAnalysisFrame());
@@ -667,10 +784,16 @@ async function measureAnalysisScenario(
       0.5,
     )),
     drawCalls: Math.max(...probes.map((probe) => probe.drawCalls)),
-    triangles: Math.max(...probes.map((probe) => probe.triangles)),
+    triangles: cullingStats
+      ? cullingStats.visible * 2
+      : Math.max(...probes.map((probe) => probe.triangles)),
     vertexInvocations: definition.visible
-      ? definition.instanceCount * (renderMeshes[0]?.geometry.getAttribute('position').count ?? 6)
+      ? (cullingStats?.visible ?? definition.instanceCount)
+        * (renderMeshes[0]?.geometry.getAttribute('position').count ?? 6)
       : 0,
+    cullingEnabled: definition.cullingEnabled ?? true,
+    cullingSubmitted: cullingStats?.submitted ?? null,
+    cullingVisible: cullingStats?.visible ?? null,
   };
 }
 
@@ -682,6 +805,7 @@ async function measureCameraUpdate(
   originalPixelRatio: number,
   sampleCount: number,
   includesProjectionRefresh: boolean,
+  contributionThreshold: number,
 ): Promise<BottleneckCameraUpdateMeasurement | null> {
   configureAnalysisScenario(renderMeshes, root, logicalSplatCount, {
     id: 'camera-update',
@@ -690,6 +814,7 @@ async function measureCameraUpdate(
     pixelRatio: originalPixelRatio,
     modelScale: 1,
     visible: true,
+    contributionThreshold,
   }, originalScale);
   const moveCamera = (): void => {
     motionOffset.copy(camera.position).sub(controls.target);
@@ -726,6 +851,7 @@ async function measureCameraUpdate(
 function buildAnalysisScenarios(
   splatCount: number,
   pixelRatio: number,
+  contributionThreshold: number,
 ): AnalysisScenarioDefinition[] {
   const scenarios: AnalysisScenarioDefinition[] = [{
     id: 'empty',
@@ -744,6 +870,7 @@ function buildAnalysisScenarios(
       pixelRatio,
       modelScale: 1,
       visible: true,
+      contributionThreshold,
     });
   }
   scenarios.push(
@@ -754,6 +881,7 @@ function buildAnalysisScenarios(
       pixelRatio,
       modelScale: 1,
       visible: true,
+      contributionThreshold,
     },
     {
       id: 'half-resolution',
@@ -762,6 +890,17 @@ function buildAnalysisScenarios(
       pixelRatio: Math.max(0.5, pixelRatio * 0.5),
       modelScale: 1,
       visible: true,
+      contributionThreshold: contributionThreshold * 0.25,
+    },
+    {
+      id: 'full-no-contribution-culling',
+      label: `${splatCount.toLocaleString()} splats · culling disabled`,
+      instanceCount: splatCount,
+      pixelRatio,
+      modelScale: 1,
+      visible: true,
+      cullingEnabled: false,
+      contributionThreshold,
     },
     {
       id: 'quarter-resolution',
@@ -770,6 +909,7 @@ function buildAnalysisScenarios(
       pixelRatio: Math.max(0.25, pixelRatio * 0.25),
       modelScale: 1,
       visible: true,
+      contributionThreshold: contributionThreshold * 0.0625,
     },
     {
       id: 'quarter-scale',
@@ -778,6 +918,7 @@ function buildAnalysisScenarios(
       pixelRatio,
       modelScale: 0.25,
       visible: true,
+      contributionThreshold: contributionThreshold * 0.0625,
     },
   );
   return scenarios;
@@ -803,11 +944,18 @@ async function executeBottleneckAnalysis(): Promise<BottleneckAnalysis> {
   const originalCameraScale = camera.scale.clone();
   const originalTarget = controls.target.clone();
   const originalMotion = exampleState.motion;
-  const definitions = buildAnalysisScenarios(exampleState.splatCount, originalPixelRatio);
+  const originalCullingEnabled = exampleState.cullingEnabled;
+  const originalContributionThreshold = exampleState.cullingThreshold;
+  const definitions = buildAnalysisScenarios(
+    exampleState.splatCount,
+    originalPixelRatio,
+    originalContributionThreshold,
+  );
   const totalStages = definitions.length + 1;
   exampleState.analysisState = 'running';
   exampleState.analysisProgress = null;
   exampleState.analysis = null;
+  exampleState.cullingStats = null;
   exampleState.error = null;
   exampleState.motion = 'idle';
   motionButton.textContent = 'Start motion test';
@@ -838,6 +986,7 @@ async function executeBottleneckAnalysis(): Promise<BottleneckAnalysis> {
       originalPixelRatio,
       3,
       mesh.diagnostics.projectedCacheEnabled,
+      originalContributionThreshold,
     );
     const derived = deriveBottleneckFindings(scenarios, cameraUpdate);
     const fullScenario = scenarios.find((scenario) => scenario.id === 'full');
@@ -863,9 +1012,8 @@ async function executeBottleneckAnalysis(): Promise<BottleneckAnalysis> {
       summary: derived.summary,
       notes: [
         'GPU timestamps measure render and compute passes; timestamp readback latency is excluded from CPU command-submission time.',
-        'Half DPR retains all instances and shader work while reducing drawing-buffer pixels to one quarter.',
-        'Quarter DPR retains all instances and shader work while reducing drawing-buffer pixels to one sixteenth.',
-        'Quarter model scale retains all instances and vertex work while reducing projected splat footprint.',
+        'Half and quarter DPR scale the contribution threshold by pixel area so the compacted survivor set remains comparable while drawing-buffer pixels fall to one quarter and one sixteenth.',
+        'Quarter model scale scales the contribution threshold by projected area to retain a comparable survivor set while reducing projected footprint.',
         `The camera-change probe renders one instance while sorting the shared ${mesh.resource.count.toLocaleString()}-splat source and refreshing ${exampleState.splatCount.toLocaleString()} cached projections; stationary frames run neither compute stage.`,
         ...(fullScenario && mesh.material.transparent && mesh.material.side === DoubleSide && !mesh.material.forceSinglePass
           ? [`Transparent DoubleSide rendering produced ${fullScenario.drawCalls.toLocaleString()} draw calls and ${fullScenario.triangles.toLocaleString()} triangles in the full probe, approximately twice the splat geometry's single-sided triangle count.`]
@@ -911,6 +1059,10 @@ async function executeBottleneckAnalysis(): Promise<BottleneckAnalysis> {
       controls.target.copy(originalTarget);
       controls.update();
       exampleState.motion = originalMotion;
+      mesh.setContributionCullingEnabled(originalCullingEnabled);
+      mesh.setContributionCullThreshold(originalContributionThreshold);
+      exampleState.cullingStats = null;
+      updateCullingSummary();
       motionButton.textContent = originalMotion === 'orbit' ? 'Stop motion test' : 'Start motion test';
       previousAnimationAt = null;
       lastTimestampResolveAt = performance.now();
@@ -970,7 +1122,15 @@ async function loadSource(key: SourceKey): Promise<void> {
   analysisButton.disabled = true;
   status.textContent = `Loading ${source.name}…`;
   setLicense(source);
-  history.replaceState(null, '', `?source=${key}${forceWebGL ? '&backend=webgl' : ''}`);
+  const nextUrl = new URL(location.href);
+  nextUrl.searchParams.set('source', key);
+  if (forceWebGL) nextUrl.searchParams.set('backend', 'webgl');
+  else nextUrl.searchParams.delete('backend');
+  if (exampleState.cullingEnabled) nextUrl.searchParams.delete('culling');
+  else nextUrl.searchParams.set('culling', 'off');
+  if (exampleState.cullingThreshold === 1) nextUrl.searchParams.delete('contribution');
+  else nextUrl.searchParams.set('contribution', String(exampleState.cullingThreshold));
+  history.replaceState(null, '', nextUrl);
 
   let resource: SOGResource | null = null;
   let mesh: SOGGaussianSplatMesh | null = null;
@@ -985,6 +1145,8 @@ async function loadSource(key: SourceKey): Promise<void> {
     });
     mesh = new SOGGaussianSplatMesh(resource);
     mesh.setInstanceTransforms(createRuntimeInstanceTransforms(resource, source));
+    mesh.setContributionCullingEnabled(exampleState.cullingEnabled);
+    mesh.setContributionCullThreshold(exampleState.cullingThreshold);
     exampleState.state = 'preparing';
     status.textContent = `Preparing ${source.name}…`;
     await mesh.prepare(renderer, { signal: controller.signal });
@@ -1009,6 +1171,10 @@ async function loadSource(key: SourceKey): Promise<void> {
     exampleState.runtimeCopyCount = composition.runtimeCopyCount;
     status.textContent = `${source.name} · ${composition.totalSplatCount.toLocaleString()} splats · ${mesh.diagnostics.backend}`;
     analysisButton.disabled = false;
+    cullingCheckbox.disabled = !mesh.diagnostics.projectedCacheEnabled;
+    contributionThresholdInput.disabled = !mesh.diagnostics.projectedCacheEnabled;
+    readCullingButton.disabled = !mesh.diagnostics.projectedCacheEnabled;
+    updateCullingSummary();
     resetFrameMetrics();
   } catch (error) {
     mesh?.dispose();

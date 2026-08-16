@@ -72,6 +72,13 @@ advertised subgroup support and a compatible reported subgroup size; custom,
 unknown, Apple, mobile, or otherwise ambiguous devices stay on Portable.
 Equal-key splats retain source order.
 
+Cached WebGPU meshes also classify projected splats before rasterization using
+an opacity-weighted screen-area metric derived from PlayCanvas. Behind-camera,
+zero-alpha, off-screen, and low-contribution splats are stably compacted into a
+GPU visible-index buffer, and a GPU-written indexed-indirect command draws only
+the survivors. The full source remains resident and can reappear after a view
+change. The conservative default contribution threshold is `1`.
+
 Equivalent in-flight loads from one `SOGLoader` are deduplicated. Each caller
 receives an independent resource lease; cancelling one caller does not abort
 other consumers, and the shared operation is aborted after the final consumer
@@ -90,7 +97,9 @@ the application has replaced or recovered its renderer.
 - `SOGGaussianSplatMesh` is a normal Three.js mesh with explicit asynchronous
   `prepare()`, scene transforms, optional pre-prepare translated batching via
   `setInstanceTransforms()`, one full-resource active range, render diagnostics,
-  and idempotent disposal.
+  configurable contribution culling via `setContributionCullingEnabled()` and
+  `setContributionCullThreshold()`, explicit opt-in culling telemetry via
+  `readContributionCullingStatsAsync()`, and idempotent disposal.
 - `SOGError` provides stable codes such as `ABORTED`, `INVALID_ARCHIVE`,
   `INVALID_METADATA`, `UNSUPPORTED_RENDERER`, and `RENDERER_MISMATCH`.
 - Exported option, state, metadata, bounds, diagnostics, and disposal types are
@@ -101,6 +110,10 @@ decoded images, splat count, retained temporary bytes, and failed-stage identity
 Render diagnostics include backend, upload/compile/prepare/first-frame/sort
 timings, sort/upload/readback counters, active count, estimated GPU allocation,
 state, selected radix backend, rounded radix bits, and selection reason.
+Contribution telemetry reports submitted/visible counts plus camera-or-alpha,
+off-screen, and low-contribution rejection counts. Reading it is explicit and
+increments the readback diagnostics; the normal stationary path performs no
+GPU readback.
 
 ## MVP limits and non-goals
 
@@ -142,6 +155,10 @@ and batches 25 translated runtime copies into one draw (4,877,475 logical
 splats). One-time static dequantization and camera-change projection/SH caches
 replace per-frame texture decode; stationary frames run no compute. No expanded
 25-copy source fixture is stored or uploaded.
+The WebGPU Example exposes contribution-culling enable/threshold controls and
+an explicit telemetry button. Its controlled profiler includes a same-view
+culling on/off A/B and corrects Three.js's CPU-side triangle estimate with the
+GPU survivor count.
 
 ## Development
 

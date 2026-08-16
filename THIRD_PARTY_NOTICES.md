@@ -1,11 +1,14 @@
 # Third-Party Notices
 
-Parts of the WebGPU radix-sort implementation are adapted from the following
-projects. No PlayCanvas runtime dependency is included.
+Parts of the WebGPU radix-sort and projected-contribution culling
+implementations are adapted from the following projects. No PlayCanvas
+runtime dependency is included.
 
 ## PlayCanvas Engine
 
 Source: https://github.com/playcanvas/engine/tree/8f41866882d36f0f0e8f22b77ebf7f9fa7b102f6
+
+Contribution-culling reference: https://github.com/playcanvas/engine/pull/8869
 
 Copyright (c) 2011-2026 PlayCanvas Ltd.
 
