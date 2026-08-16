@@ -102,8 +102,8 @@ try {
     browsers: browserResults,
     cpuStress: syntheticCpuBenchmark(250_000),
     mvpLimit: {
-      splats: 2_000_000,
-      estimatedNativeGpuBytes: 2_000_000 * 52,
+      splats: 5_000_000,
+      estimatedNativeGpuBytes: 5_000_000 * 52,
       nextPowerOfTwoSortCapacity: 2_097_152,
     },
   };

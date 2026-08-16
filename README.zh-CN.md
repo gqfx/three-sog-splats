@@ -89,8 +89,8 @@ backend、舍入后的 radix bits 和选择原因。
 
 ## MVP 限制与非目标
 
-每个 bundled 资源强制上限为 2,000,000 splats。规划估算为每个 splat 52 个
-GPU 字节，上限时约 104 MB；这还不含渲染器、解码图片、framebuffer 和浏览器
+每个 bundled 资源强制上限为 5,000,000 splats。规划估算为每个 splat 52 个
+GPU 字节，上限时约 260 MB；这还不含渲染器、解码图片、framebuffer 和浏览器
 开销。它是内存护栏，不是所有设备上的性能承诺，生产资源需在目标 GPU 实测。
 
 MVP 支持单个全资源 active range、SOG v2 stored/deflated ZIP、no-SH 和受支持
@@ -112,6 +112,8 @@ Splatting example 的页面结构，来源列表只展示真实模型：no-SH �
 **Start motion test** / **Stop motion test** 可在不改变 active count 的情况下重复
 采样全量模型性能；页面与结构化状态会报告帧耗时分位数、排序速率/总数、viewport、
 DPR 和 backend 对应的排序计时含义。参见[示例说明](./examples/README.md)。
+来源列表还包含可复现的 5,000,000-splat 合成 WebGPU 压测场景；Portable 路径报告
+约 200 MB GPU 资源，若当前为强制 WebGL 会自动切换到 WebGPU。
 
 ## 开发验证
 

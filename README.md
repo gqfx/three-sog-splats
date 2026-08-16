@@ -103,8 +103,8 @@ state, selected radix backend, rounded radix bits, and selection reason.
 
 ## MVP limits and non-goals
 
-The enforced limit is 2,000,000 splats per bundled resource. The planning
-estimate is 52 GPU bytes per splat (about 104 MB at the limit) before renderer,
+The enforced limit is 5,000,000 splats per bundled resource. The planning
+estimate is 52 GPU bytes per splat (about 260 MB at the limit) before renderer,
 decoded-image, framebuffer, and browser overhead. Validate production assets on
 the target GPU; this is a memory guardrail, not a universal performance promise.
 
@@ -133,6 +133,9 @@ control reloads with either WebGPU or forced WebGL.
 performance sampling without changing the active count. The overlay and
 structured state report frame percentiles, sort rate/count, viewport, DPR, and
 backend-specific sort timing. See [example notes](./examples/README.md).
+The source selector also includes a reproducible synthetic 5,000,000-splat
+WebGPU stress scene. It uses about 200 MB of reported GPU resources on the
+Portable path and automatically switches away from forced WebGL.
 
 ## Development
 

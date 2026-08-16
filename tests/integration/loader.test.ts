@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SOGError } from '../../src/core/errors.js';
+import { SOG_MVP_MAX_SPLATS } from '../../src/core/types.js';
 import { SOGLoader } from '../../src/loader/SOGLoader.js';
 import {
   bundleResponse,
@@ -10,6 +11,25 @@ import {
 } from '../helpers/fixture-builder.js';
 
 describe('SOGLoader', () => {
+  it('accepts exactly 5,000,000 splats and rejects larger resources', async () => {
+    expect(SOG_MVP_MAX_SPLATS).toBe(5_000_000);
+    const atLimit = { ...validMeta, count: SOG_MVP_MAX_SPLATS };
+    const resource = await new SOGLoader().loadAsync('five-million.sog', {
+      fetch: async () => bundleResponse(createBundle(atLimit)),
+      imageDecoder: new FakeImageDecoder(4_096, 1_221),
+      useArchiveWorker: false,
+    });
+    expect(resource.count).toBe(5_000_000);
+    resource.dispose();
+
+    const aboveLimit = { ...validMeta, count: SOG_MVP_MAX_SPLATS + 1 };
+    await expect(new SOGLoader().loadAsync('too-large.sog', {
+      fetch: async () => bundleResponse(createBundle(aboveLimit)),
+      imageDecoder: new FakeImageDecoder(4_096, 1_222),
+      useArchiveWorker: false,
+    })).rejects.toThrow(/exceeds the documented MVP limit of 5000000/);
+  });
+
   it('loads a native SOG resource without expanding Gaussian attributes', async () => {
     const archive = createBundle();
     const decoder = new FakeImageDecoder();

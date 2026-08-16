@@ -139,5 +139,5 @@ export interface PreparedSOGTextures {
   readonly codebook: Texture;
 }
 
-export const SOG_MVP_MAX_SPLATS = 2_000_000;
+export const SOG_MVP_MAX_SPLATS = 5_000_000;
 export const SOG_MVP_ESTIMATED_BYTES_PER_SPLAT = 52;

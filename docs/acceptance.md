@@ -19,13 +19,13 @@ Compatibility window: Three.js 0.184.0-0.185.0
 | Public example | Three.js-style standalone page, real no-SH and SH model selection, source replacement, camera fitting, attribution, dual-backend snapshots, deterministic motion/recovery control, structured performance diagnostics, WebGPU/WebGL selection, and production build | Pass |
 | First visible frame | Diagnostics and integration checks report zero deferred required uploads/compiles after `prepare()` | Pass |
 | External package | `npm pack`, temporary TypeScript consumer at the r184 lower bound, peer resolution, declarations, Vite build/startup, external imports, forbidden-code scan | Pass |
-| Limits and performance | Full-resolution idle/orbit/recovery timings for Millipede and Lion on both backends, exact dual-radix allocation, zero-readback checks, and the 2,000,000-splat guardrail | Pass |
+| Limits and performance | Full-resolution idle/orbit/recovery timings for Millipede and Lion on both backends, a real 5,000,000-splat WebGPU stress scene, exact dual-radix allocation, zero-readback checks, and the 5,000,000-splat guardrail | Pass |
 
 Release validation is run with `npm run test:acceptance`, which includes the
 browser and external-consumer gates. The final command record is updated
 whenever the compatibility baseline or fixture output changes.
 
-Final run: typecheck, lint, declaration and example builds, 93 unit/integration
+Final run: typecheck, lint, declaration and example builds, 97 unit/integration
 tests, 11 real-browser tests on both r184 and r185, and the external
 package-consumer check all passed. The browser run exercised WebGPU and forced
 WebGL for internal synthetic no-SH/SH fixtures and the full-resolution

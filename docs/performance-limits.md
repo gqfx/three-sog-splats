@@ -2,12 +2,12 @@
 
 ## Guardrail
 
-The loader rejects resources above 2,000,000 splats. Including adaptive keys,
-the exact Portable radix storage is 40,062,776 bytes at that limit; the
-24-bit OneSweep layout is 41,603,596 bytes. These figures cover key/value
+The loader rejects resources above 5,000,000 splats. Including adaptive keys,
+the exact Portable radix storage is 100,156,900 bytes at that limit; the
+24-bit OneSweep layout is 104,005,900 bytes. These figures cover key/value
 ping-pong and exact scratch buffers, but not source textures or renderer-owned
 uniform storage. The public planning constant remains 52 GPU bytes per splat,
-or 104,000,000 bytes at the limit.
+or 260,000,000 bytes at the limit.
 
 The limit does not reserve memory. Decoded browser images, framebuffer targets,
 Three.js renderer state, driver allocations, and other scene content add to the
@@ -74,6 +74,16 @@ Sorting is suppressed on an unchanged view. Consequently this change does not
 improve stationary Lion SH2 shading cost: idle frames perform no radix work,
 and projection/SH caching remains outside this scope.
 
+### Five-million-splat stress scene
+
+The synthetic CC0 lattice contains exactly 5,000,000 addressable Gaussians in
+4096x1221 attribute textures. On the local WebGPU Portable path it prepared in
+about 156 ms, selected 20 radix bits, retained zero CPU sort allocation and zero
+readbacks, and reported 200,185,316 estimated GPU bytes. At 960x640 DPR 1 the
+stationary shading workload measured about 5.6 FPS (178.2 ms average frame,
+422.3 ms p95). This is intentionally a memory and overdraw stress case; forced
+WebGL automatically redirects it to WebGPU.
+
 The baseline was recorded on 2026-08-15 using macOS arm64, Node v24.14.0, and
 Headless Chrome 151 with Three.js 0.185.0. The bundled CC0 fixtures contain four
 synthetic splats, so their measurements represent fixed pipeline and loading
@@ -97,8 +107,8 @@ A deterministic 250,000-center CPU stress case had a median key-generation plus
 stable 32-bit radix-sort time of 14.39 ms across five runs. Compact centers plus
 order use 4 MB. The 52-byte native planning estimate is 13 MB, while a simple
 fully expanded SH3 layout (position, quaternion, scale, RGBA, and 45 SH floats)
-is 59 MB, 4.54 times the planning estimate. At the 2,000,000-splat guardrail,
-the planning estimate is 104 MB before the additional allocations listed above.
+is 59 MB, 4.54 times the planning estimate. At the 5,000,000-splat guardrail,
+the planning estimate is 260 MB before the additional allocations listed above.
 At that limit, the dual-radix allocation figures at the start of this document
 apply in addition to source textures and renderer allocations.
 
@@ -117,7 +127,7 @@ the backend, active count, viewport, DPR, frame distribution, total sort count,
 sort rate, and whether the displayed sort duration is CPU submission or Worker
 execution time.
 
-Exact allocation is unit-tested at empty, full-fixture, and 2,000,000-splat
-boundaries. Lifecycle tests cover repeated
+Exact allocation is unit-tested at empty, full-fixture, two-million, and
+5,000,000-splat boundaries. Lifecycle tests cover repeated
 load/dispose, abort during loading and preparation, renderer/device
 initialization loss, and idempotent cleanup.

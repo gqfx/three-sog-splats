@@ -22,6 +22,7 @@ describe('adaptive radix reference behavior', () => {
     [116_374, 15],
     [195_099, 16],
     [2_000_000, 19],
+    [5_000_000, 20],
     [Number.MAX_SAFE_INTEGER, 20],
   ])('requests adaptive precision for %s splats', (count, expected) => {
     expect(requestedAdaptiveDepthBits(count)).toBe(expected);

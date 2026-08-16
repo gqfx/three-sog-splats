@@ -11,7 +11,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SOGGaussianSplatMesh, SOGLoader } from '../src/index.js';
 import type { SOGResource } from '../src/index.js';
 
-type SourceKey = 'no-sh' | 'sh';
+type SourceKey = 'no-sh' | 'sh' | 'stress-5m';
 
 interface FramePerformanceMetrics {
   readonly backend: string | null;
@@ -98,11 +98,18 @@ const sources: Record<SourceKey, SourceDefinition> = {
       licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
     },
   },
+  'stress-5m': {
+    name: 'Synthetic lattice · 5,000,000 · no SH',
+    url: '/five-million.sog',
+    cameraDirection: new Vector3(1, 0.7, 1),
+  },
 };
 
 const parameters = new URLSearchParams(location.search);
 const requestedSource = parameters.get('source');
-const initialSource: SourceKey = requestedSource === 'sh' ? 'sh' : 'no-sh';
+const initialSource: SourceKey = requestedSource === 'sh' || requestedSource === 'stress-5m'
+  ? requestedSource
+  : 'no-sh';
 const forceWebGL = parameters.get('backend') === 'webgl';
 const status = document.querySelector<HTMLElement>('#status')!;
 const performanceSummary = document.querySelector<HTMLElement>('#performance-summary')!;
@@ -327,6 +334,14 @@ function disposeSelection(): void {
 }
 
 async function loadSource(key: SourceKey): Promise<void> {
+  if (key === 'stress-5m' && forceWebGL) {
+    status.textContent = 'The 5M stress scene requires WebGPU; switching backend…';
+    const next = new URL(location.href);
+    next.searchParams.set('source', key);
+    next.searchParams.delete('backend');
+    location.assign(next);
+    return;
+  }
   const generation = ++loadGeneration;
   currentController?.abort();
   const controller = new AbortController();

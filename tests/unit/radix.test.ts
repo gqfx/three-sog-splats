@@ -62,7 +62,7 @@ describe('portable radix sort oracle', () => {
     expect(isCompleteMonotonicBucketOrder(buckets, order)).toBe(false);
   });
 
-  it('validates a complete order at the 2,000,000-splat limit', () => {
+  it('validates a complete order for a two-million-splat large model', () => {
     const count = 2_000_000;
     const buckets = Uint32Array.from({ length: count }, (_, index) => Math.floor(index / 32));
     const order = Uint32Array.from({ length: count }, (_, index) => index);

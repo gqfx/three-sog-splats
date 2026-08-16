@@ -16,6 +16,10 @@ tests and are not presented as public models. The example can switch between
 the WebGPU and forced WebGL backends. The legacy `source=millipede` query is
 accepted as an alias for `source=no-sh`.
 
+The source selector also exposes a reproducible 5,000,000-splat colored
+lattice for WebGPU memory, sorting, and overdraw stress. Generate it with
+`npm run generate:5m`; forced WebGL redirects this source to WebGPU.
+
 The Lion fixture also exercises the production SOG v2 SH layout: its metadata
 declares a 65,536-entry, two-band palette and its centroid texture is
 512×1024. The loader derives this geometry from `shN.count` and `shN.bands`;

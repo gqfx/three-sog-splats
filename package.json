@@ -31,6 +31,7 @@
     "test:browser": "playwright test",
     "test:package": "node scripts/test-package.mjs",
     "benchmark": "npm run build && node scripts/benchmark.mjs",
+    "generate:5m": "node scripts/generate-five-million-fixture.mjs",
     "test:acceptance": "npm run typecheck && npm run lint && npm run test && npm run build && npm run build:example && npm run test:browser && npm run test:package",
     "example": "vite --config examples/vite.config.ts"
   },
