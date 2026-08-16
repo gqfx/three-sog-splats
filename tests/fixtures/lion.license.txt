@@ -1,0 +1,18 @@
+Title: Lion (full-resolution SOG test conversion)
+Original title: Lion
+Author: Renaud (https://superspl.at/user?id=rohls)
+Original source: https://superspl.at/scene/56155c3f
+Three.js source: https://github.com/mrdoob/three.js/blob/6987fe81fb3f5c3f46648eee40c248406e846c3c/examples/models/spz/lion.v3.spz
+License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+License URL: https://creativecommons.org/licenses/by/4.0/
+
+Change made for this repository:
+- Transcoded all 195,099 Gaussians from SPZ v3 to bundled SOG v2 without
+  decimation, filtering, SH band reduction, or other data-reduction steps.
+
+Conversion tool:
+- @playcanvas/splat-transform 3.0.0
+- Source commit: daf63383f32effe5cd63faa67ff030d39bfa543e
+
+Reproduction command:
+splat-transform -g cpu --max-workers 0 lion.v3.spz lion.sog

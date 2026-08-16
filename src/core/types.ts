@@ -33,6 +33,8 @@ export interface SOGMetaV2 {
     readonly files: readonly [string];
   };
   readonly shN?: {
+    readonly count: number;
+    readonly bands: 1 | 2 | 3;
     readonly codebook: readonly number[];
     readonly files: readonly [string, string];
   };

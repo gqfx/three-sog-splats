@@ -89,10 +89,17 @@ const sources: Record<SourceKey, SourceDefinition> = {
     scale: 0.35,
   },
   sh: {
-    name: 'Synthetic · SH1',
-    url: '/minimal-sh1.sog',
-    cameraDirection: new Vector3(0.35, 0.25, 4),
-    scale: 0.35,
+    name: 'Lion · full 195K · SH2',
+    url: '/lion.sog',
+    cameraDirection: new Vector3(0, 0.2, 1),
+    rotation: new Euler(Math.PI, 0, 0),
+    credit: {
+      author: 'Renaud',
+      authorUrl: 'https://superspl.at/user?id=rohls',
+      source: 'https://superspl.at/scene/56155c3f',
+      license: 'CC BY 4.0',
+      licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
+    },
   },
 };
 

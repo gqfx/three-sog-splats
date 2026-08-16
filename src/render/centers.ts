@@ -29,6 +29,24 @@ export interface CenterDecodeTextures {
 
 const centerCache = new WeakMap<object, Promise<Float32Array>>();
 
+export function unpackWebGLCenterReadback(
+  rgba: Float32Array,
+  width: number,
+  height: number,
+  count: number,
+): Float32Array {
+  const centers = new Float32Array(count * 3);
+  for (let index = 0; index < count; index += 1) {
+    const x = index % width;
+    const y = Math.floor(index / width);
+    const readbackIndex = (height - 1 - y) * width + x;
+    centers[index * 3] = rgba[readbackIndex * 4] ?? 0;
+    centers[index * 3 + 1] = rgba[readbackIndex * 4 + 1] ?? 0;
+    centers[index * 3 + 2] = rgba[readbackIndex * 4 + 2] ?? 0;
+  }
+  return centers;
+}
+
 function buildCenterMaterial(textures: CenterDecodeTextures, meta: SOGMetaV2): NodeMaterial {
   const material = new NodeMaterial();
   material.name = 'SOG means-only center decode';
@@ -86,13 +104,7 @@ async function decodeCenters(
     const rgba = pixels instanceof Float32Array
       ? pixels
       : new Float32Array(pixels.buffer, pixels.byteOffset, Math.floor(pixels.byteLength / 4));
-    const centers = new Float32Array(meta.count * 3);
-    for (let index = 0; index < meta.count; index += 1) {
-      centers[index * 3] = rgba[index * 4] ?? 0;
-      centers[index * 3 + 1] = rgba[index * 4 + 1] ?? 0;
-      centers[index * 3 + 2] = rgba[index * 4 + 2] ?? 0;
-    }
-    return centers;
+    return unpackWebGLCenterReadback(rgba, textures.width, textures.height, meta.count);
   } finally {
     renderer.setRenderTarget(previous);
     target.dispose();

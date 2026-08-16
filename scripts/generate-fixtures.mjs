@@ -90,7 +90,12 @@ const encode = (meta, extra = {}) => zipSync({
 await writeFile(resolve(fixtureRoot, 'minimal-no-sh.sog'), encode(commonMeta));
 await writeFile(resolve(fixtureRoot, 'minimal-sh1.sog'), encode({
   ...commonMeta,
-  shN: { codebook, files: ['shN_centroids.webp', 'shN_labels.webp'] },
+  shN: {
+    count: 256,
+    bands: 1,
+    codebook,
+    files: ['shN_centroids.webp', 'shN_labels.webp'],
+  },
 }, {
   'shN_centroids.webp': await bytes('shN_centroids.webp'),
   'shN_labels.webp': await bytes('shN_labels.webp'),

@@ -28,7 +28,7 @@ import {
   ivec2,
   max,
   modelViewMatrix,
-  modelWorldMatrix,
+  modelWorldMatrixInverse,
   normalize,
   sqrt,
   storage,
@@ -151,12 +151,9 @@ function decodeColor(
   if (meta.shN && textures.shCentroids && textures.shLabels) {
     const label = textureLoad(textures.shLabels, pixel).rg.mul(255).round();
     const paletteIndex = uint(label.x).add(uint(label.y).mul(256));
-    const coefficientCount = [3, 8, 15][Math.max(0, Math.min(2, (() => {
-      const width = (textures.shCentroids.image as { width?: number }).width ?? 0;
-      return width === 192 ? 0 : width === 512 ? 1 : 2;
-    })()))] ?? 3;
-    const worldCenter = modelWorldMatrix.mul(vec4(center.x, center.y, center.z, 1)).xyz;
-    const direction = normalize(cameraPosition.sub(worldCenter));
+    const coefficientCount = [0, 3, 8, 15][meta.shN.bands]!;
+    const localCameraPosition = modelWorldMatrixInverse.mul(vec4(cameraPosition, 1)).xyz;
+    const direction = normalize(localCameraPosition.sub(center));
     const basis = shBasis(direction);
     for (let coefficient = 0; coefficient < coefficientCount; coefficient += 1) {
       const x = paletteIndex.mod(64).mul(coefficientCount).add(coefficient);

@@ -199,6 +199,32 @@ for (const backend of ['webgpu', 'webgl'] as const) {
       () => window.__THREE_SOG_EXAMPLE__.performance?.sortsPerSecond,
     )).toBe(0);
 
+    await page.locator('#source').selectOption('sh');
+    await page.waitForFunction(() => {
+      const state = window.__THREE_SOG_EXAMPLE__;
+      return state?.state === 'ready' && state.source === 'sh';
+    });
+    const shModel = await page.evaluate(() => window.__THREE_SOG_EXAMPLE__);
+    expect(shModel.backend).toBe(backend);
+    expect(shModel.splatCount).toBe(195_099);
+    await expect(page.locator('#status')).toContainText('195,099 splats');
+    await expect(page.locator('#license')).toContainText('Renaud');
+    await page.waitForFunction(() => (window.__THREE_SOG_EXAMPLE__.performance?.sampleFrames ?? 0) >= 30);
+    await expect.poll(() => page.evaluate(
+      () => window.__THREE_SOG_EXAMPLE__.performance?.sortsPerSecond,
+    )).toBe(0);
+    const overlays = page.locator('#info, #controls, #diagnostics');
+    await overlays.evaluateAll((elements) => {
+      for (const element of elements) (element as HTMLElement).style.visibility = 'hidden';
+    });
+    await expect(page.locator('canvas')).toHaveScreenshot(`${backend}-lion-sh2.png`, {
+      maxDiffPixelRatio: 0.025,
+      threshold: 0.25,
+    });
+    await overlays.evaluateAll((elements) => {
+      for (const element of elements) (element as HTMLElement).style.visibility = '';
+    });
+
     await page.locator('#source').selectOption('no-sh');
     await page.waitForFunction(() => {
       const state = window.__THREE_SOG_EXAMPLE__;

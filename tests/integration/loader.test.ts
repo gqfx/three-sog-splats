@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SOGError } from '../../src/core/errors.js';
 import { SOGLoader } from '../../src/loader/SOGLoader.js';
-import { bundleResponse, createBundle, FakeImageDecoder } from '../helpers/fixture-builder.js';
+import {
+  bundleResponse,
+  codebook,
+  createBundle,
+  FakeImageDecoder,
+  validMeta,
+} from '../helpers/fixture-builder.js';
 
 describe('SOGLoader', () => {
   it('loads a native SOG resource without expanding Gaussian attributes', async () => {
@@ -42,6 +48,27 @@ describe('SOGLoader', () => {
       stage: 'validation',
       diagnostics: { failedStage: 'validation', decodedImages: 5 },
     });
+  });
+
+  it('loads the full-height palette layout used by real SOG v2 SH assets', async () => {
+    const meta = {
+      ...validMeta,
+      shN: {
+        count: 65_536,
+        bands: 2,
+        codebook,
+        files: ['shN_centroids.webp', 'shN_labels.webp'],
+      },
+    };
+    const resource = await new SOGLoader().loadAsync('sh2.sog', {
+      fetch: async () => bundleResponse(createBundle(meta)),
+      imageDecoder: new FakeImageDecoder(2, 2, { 'shN_centroids.webp': [512, 1024] }),
+      useArchiveWorker: false,
+    });
+    expect(resource.shBands).toBe(2);
+    expect(resource.meta.shN).toMatchObject({ count: 65_536, bands: 2 });
+    expect(resource.nativeImages.size).toBe(7);
+    resource.dispose();
   });
 
   it('aborts the shared operation after its final consumer detaches', async () => {

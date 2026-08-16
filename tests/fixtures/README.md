@@ -13,5 +13,11 @@ and are released under CC0-1.0. They contain only synthetic pixels and metadata:
 covered by a separate CC BY 4.0 attribution in `millipede.license.txt`; it is
 not part of the CC0 synthetic fixture set.
 
+`generated/lion.sog` is a direct, full-resolution conversion of the
+195,099-Gaussian, two-band SH `lion.v3.spz` asset in the Three.js repository.
+Its complete splat count and SH payload are preserved without decimation or
+filtering. It is covered by the separate CC BY 4.0 attribution in
+`lion.license.txt` and is not part of the CC0 synthetic fixture set.
+
 The WebP images are data images. They must be decoded without color conversion,
 premultiplication, filtering, mipmaps, or vertical flipping.

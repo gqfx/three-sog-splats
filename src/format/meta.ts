@@ -107,8 +107,18 @@ export function parseAndValidateMeta(
       ? {}
       : (() => {
           const shN = record(root.shN, 'shN');
+          const count = finiteNumber(shN.count, 'shN.count');
+          if (!Number.isSafeInteger(count) || count <= 0 || count > 65_536) {
+            invalid('shN.count must be a positive safe integer no greater than 65536.');
+          }
+          const bands = finiteNumber(shN.bands, 'shN.bands');
+          if (bands !== 1 && bands !== 2 && bands !== 3) {
+            invalid('shN.bands must be 1, 2, or 3.');
+          }
           return {
             shN: {
+              count,
+              bands,
               codebook: codebook(shN.codebook, 'shN.codebook'),
               files: files(shN.files, 'shN.files', 2) as [string, string],
             },
@@ -164,13 +174,20 @@ export function validateImageDimensions(meta: SOGMetaV2, images: ReadonlyMap<SOG
     }
   }
 
+  if (!meta.shN) return 0;
   const centroids = images.get('shN_centroids');
-  if (!centroids) return 0;
-  const bands = new Map([[192, 1], [512, 2], [960, 3]]).get(centroids.width);
-  if (bands === undefined || centroids.height !== 4) {
-    throw new SOGError('IMAGE_DIMENSION_MISMATCH', `SOG SH centroid image must be 192x4, 512x4, or 960x4; received ${centroids.width}x${centroids.height}.`, { stage: 'validation' });
+  if (!centroids) invalid('decoded shN_centroids image is missing.');
+  const coefficientCount = [0, 3, 8, 15][meta.shN.bands]!;
+  const expectedWidth = 64 * coefficientCount;
+  const expectedHeight = Math.ceil(meta.shN.count / 64);
+  if (centroids.width !== expectedWidth || centroids.height !== expectedHeight) {
+    throw new SOGError(
+      'IMAGE_DIMENSION_MISMATCH',
+      `SOG SH centroid image is ${centroids.width}x${centroids.height}; expected ${expectedWidth}x${expectedHeight} for ${meta.shN.count} SH${meta.shN.bands} centroids.`,
+      { stage: 'validation' },
+    );
   }
-  return bands;
+  return meta.shN.bands;
 }
 
 export function unlog(value: number): number {

@@ -27,6 +27,8 @@ export function createBundle(
     'scales.webp': new Uint8Array([3]),
     'quats.webp': new Uint8Array([4]),
     'sh0.webp': new Uint8Array([5]),
+    'shN_centroids.webp': new Uint8Array([6]),
+    'shN_labels.webp': new Uint8Array([7]),
   };
   if (options.omit) delete entries[options.omit];
   const zip = zipSync(entries, { level: options.level ?? 0 });
