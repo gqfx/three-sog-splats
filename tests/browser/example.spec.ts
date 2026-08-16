@@ -86,6 +86,7 @@ for (const fixture of ['no-sh', 'sh'] as const) {
       const verification = await page.evaluate(() => window.__SOG_EXAMPLE__.verifyGpuSort());
       expect(verification.complete).toBe(true);
       expect(verification.monotonic).toBe(true);
+      expect(verification.stable).toBe(true);
       expect(verification.order).toHaveLength(4);
       expect([...verification.order].sort((left, right) => left - right)).toEqual([0, 1, 2, 3]);
       expect((await page.evaluate(() => window.__SOG_EXAMPLE__.diagnostics?.readbackCount))).toBe(0);
@@ -105,6 +106,35 @@ for (const fixture of ['no-sh', 'sh'] as const) {
     });
   });
 }
+
+test('validates Portable radix edge fixtures on WebGPU when available', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('console', (message) => {
+    if (/GPUValidationError|validation error/i.test(message.text())) errors.push(message.text());
+  });
+  await page.goto('/?fixture=no-sh');
+  await page.waitForFunction(() => ['ready', 'failed'].includes(window.__SOG_EXAMPLE__?.state));
+  const snapshot = await page.evaluate(() => window.__SOG_EXAMPLE__);
+  if (snapshot.state !== 'ready' || snapshot.backend !== 'webgpu') {
+    test.skip(true, 'WebGPU is unavailable in this browser environment.');
+  }
+  const fixtures = await page.evaluate(() => window.__SOG_EXAMPLE__.verifyPortableRadixFixtures());
+  expect(Object.keys(fixtures)).toEqual([
+    'empty',
+    'singleton',
+    'duplicate-heavy',
+    'partial-workgroup',
+    'multi-workgroup',
+    'full-capacity',
+  ]);
+  for (const [name, result] of Object.entries(fixtures)) {
+    expect(result.complete, name).toBe(true);
+    expect(result.monotonic, name).toBe(true);
+    expect(result.stable, name).toBe(true);
+  }
+  expect(errors).toEqual([]);
+});
 
 for (const backend of ['webgpu', 'webgl'] as const) {
   test(`renders the real Three.js millipede fixture with ${backend}`, async ({ page }) => {

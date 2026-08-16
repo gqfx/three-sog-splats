@@ -1,23 +1,25 @@
 import {
   BoxGeometry,
   Color,
-  DataTexture,
-  Matrix4,
   Mesh,
   MeshBasicMaterial,
-  NearestFilter,
-  NoColorSpace,
   PerspectiveCamera,
-  RGBAFormat,
   Scene,
-  UnsignedByteType,
-  Vector3,
+  StorageBufferAttribute,
   WebGPURenderer,
 } from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { BrowserSOGImageDecoder, SOGGaussianSplatMesh, SOGLoader } from '../src/index.js';
 import type { SOGLoadDiagnostics, SOGRenderDiagnostics } from '../src/index.js';
-import { ParallelGpuSorter } from '../src/render/sort/ParallelGpuSorter.js';
+import { PortableRadixSortBackend } from '../src/render/sort/PortableRadixSortBackend.js';
+
+interface GpuSortVerification {
+  readonly order: number[];
+  readonly buckets: number[];
+  readonly complete: boolean;
+  readonly monotonic: boolean;
+  readonly stable: boolean;
+}
 
 declare global {
   interface Window {
@@ -32,12 +34,8 @@ declare global {
       moveCamera(): void;
       dispose(): void;
       decodeFixtureTexel(filename: string): Promise<number[]>;
-      verifyGpuSort(): Promise<{
-        order: number[];
-        buckets: number[];
-        complete: boolean;
-        monotonic: boolean;
-      }>;
+      verifyGpuSort(): Promise<GpuSortVerification>;
+      verifyPortableRadixFixtures(): Promise<Record<string, GpuSortVerification>>;
     };
   }
 }
@@ -65,7 +63,10 @@ const state: Window['__SOG_EXAMPLE__'] = window.__SOG_EXAMPLE__ = {
   moveCamera: () => {},
   dispose: () => {},
   decodeFixtureTexel: async () => [],
-  verifyGpuSort: async () => ({ order: [], buckets: [], complete: false, monotonic: false }),
+  verifyGpuSort: async () => ({
+    order: [], buckets: [], complete: false, monotonic: false, stable: false,
+  }),
+  verifyPortableRadixFixtures: async () => ({}),
 };
 
 state.decodeFixtureTexel = async (filename) => {
@@ -85,59 +86,62 @@ state.decodeFixtureTexel = async (filename) => {
   }
 };
 
-state.verifyGpuSort = async () => {
+async function verifyPortableKeys(keys: Uint32Array, bits: number): Promise<GpuSortVerification> {
   if (state.backend !== 'webgpu') {
-    return { order: [], buckets: [], complete: false, monotonic: false };
+    return { order: [], buckets: [...keys], complete: false, monotonic: false, stable: false };
   }
-  const lowBytes = new Uint8Array(4 * 4);
-  const highBytes = new Uint8Array(4 * 4);
-  const quantizedZ = [20_000, 1_000, 40_000, 20_000];
-  for (let index = 0; index < quantizedZ.length; index += 1) {
-    const value = quantizedZ[index]!;
-    lowBytes[index * 4 + 2] = value & 0xff;
-    highBytes[index * 4 + 2] = value >>> 8;
-    lowBytes[index * 4 + 3] = 255;
-    highBytes[index * 4 + 3] = 255;
-  }
-  const createTexture = (data: Uint8Array) => {
-    const texture = new DataTexture(data, 4, 1, RGBAFormat, UnsignedByteType);
-    texture.minFilter = NearestFilter;
-    texture.magFilter = NearestFilter;
-    texture.generateMipmaps = false;
-    texture.colorSpace = NoColorSpace;
-    texture.flipY = false;
-    texture.needsUpdate = true;
-    return texture;
-  };
-  const meansLow = createTexture(lowBytes);
-  const meansHigh = createTexture(highBytes);
-  renderer.initTexture(meansLow);
-  renderer.initTexture(meansHigh);
-  const sorter = new ParallelGpuSorter(
-    4,
-    { meansLow, meansHigh, width: 4 },
-    new Vector3(-3, -3, -3),
-    new Vector3(3, 3, 3),
-  );
+  const input = new StorageBufferAttribute(keys.length === 0 ? new Uint32Array(1) : keys, 1);
+  const sorter = new PortableRadixSortBackend(keys.length, input, bits);
   try {
-    sorter.updateViewMatrix(new Matrix4());
+    if (keys.length === 0) {
+      return { order: [], buckets: [], complete: true, monotonic: true, stable: true };
+    }
     await sorter.sortAsync(renderer);
-    const [orderBuffer, bucketBuffer] = await Promise.all([
-      renderer.getArrayBufferAsync(sorter.orderAttribute),
-      renderer.getArrayBufferAsync(sorter.bucketAttribute),
-    ]);
-    const order = new Uint32Array(orderBuffer).slice(0, 4);
-    const buckets = new Uint32Array(bucketBuffer).slice(0, 4);
-    const complete = new Set(order).size === 4 && order.every((index) => index < 4);
+    const order = new Uint32Array(
+      await renderer.getArrayBufferAsync(sorter.orderAttribute),
+    ).slice(0, keys.length);
+    const complete = new Set(order).size === keys.length
+      && order.every((index) => index < keys.length);
     const monotonic = order.every((index, position) => (
-      position === 0 || buckets[order[position - 1]!]! <= buckets[index]!
+      position === 0 || keys[order[position - 1]!]! <= keys[index]!
     ));
-    return { order: [...order], buckets: [...buckets], complete, monotonic };
+    const expected = [...keys.keys()].sort((left, right) => keys[left]! - keys[right]! || left - right);
+    const stable = [...order].every((value, index) => value === expected[index]);
+    return { order: [...order], buckets: [...keys], complete, monotonic, stable };
   } finally {
     sorter.dispose();
-    meansLow.dispose();
-    meansHigh.dispose();
+    input.dispose();
   }
+}
+
+state.verifyGpuSort = async () => verifyPortableKeys(
+  Uint32Array.from([20_000, 1_000, 40_000, 20_000]),
+  16,
+);
+
+state.verifyPortableRadixFixtures = async () => {
+  const fixtures: Record<string, Uint32Array> = {
+    empty: new Uint32Array(),
+    singleton: Uint32Array.of(7),
+    'duplicate-heavy': Uint32Array.from({ length: 513 }, (_, index) => index % 7),
+    'partial-workgroup': Uint32Array.from(
+      { length: 2_051 },
+      (_, index) => ((index * 2654435761) >>> 0) & 0xfff,
+    ),
+    'multi-workgroup': Uint32Array.from(
+      { length: 4_097 },
+      (_, index) => ((index * 2246822519) >>> 0) & 0xfff,
+    ),
+    'full-capacity': Uint32Array.from(
+      { length: 8_192 },
+      (_, index) => ((index * 3266489917) >>> 0) & 0xfff,
+    ),
+  };
+  const results: Record<string, GpuSortVerification> = {};
+  for (const [name, keys] of Object.entries(fixtures)) {
+    results[name] = await verifyPortableKeys(keys, 12);
+  }
+  return results;
 };
 
 const scene = new Scene();
