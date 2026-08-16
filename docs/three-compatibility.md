@@ -17,7 +17,7 @@ The package integrates directly with public `three`, `three/webgpu`, and
 | r167 | Introduced the separately consumable WebGPU/TSL build used through `three/webgpu` | Necessary foundation, but insufficient |
 | r180 | Exposes `floatBitsToUint`, used to generate sortable IEEE-754 depth keys without GPU readback | Necessary for the WebGPU sorter, but insufficient |
 | r183 | Exposes explicit render-target initialization used by the WebGL preparation readback | Rendering starts, but deterministic storage-buffer disposal and program-memory diagnostics are absent |
-| r184 | Public TSL storage atomics plus `BufferAttribute.dispose()` and renderer program-memory diagnostics | First release satisfying parallel sorting, rendering, diagnostics, and deterministic cleanup |
+| r184 | Public TSL storage atomics and `modelWorldMatrixInverse`, plus `BufferAttribute.dispose()` and renderer program-memory diagnostics | First release satisfying parallel sorting, transformed SH rendering, diagnostics, and deterministic cleanup |
 | r185 | Current pinned development version | Fully accepted |
 
 Primary sources:
@@ -27,6 +27,7 @@ Primary sources:
 - [Three.js r183 common renderer API](https://github.com/mrdoob/three.js/blob/r183/src/renderers/common/Renderer.js)
 - [Three.js r184 BufferAttribute lifecycle API](https://github.com/mrdoob/three.js/blob/r184/src/core/BufferAttribute.js)
 - [Three.js r184 renderer information API](https://github.com/mrdoob/three.js/blob/r184/src/renderers/common/Info.js)
+- [Three.js r184 model matrix node exports](https://github.com/mrdoob/three.js/blob/r184/src/nodes/accessors/ModelNode.js)
 
 ## Runtime verification
 
@@ -37,7 +38,10 @@ artifacts in Headless Chrome with WebGPU enabled. Both runs passed:
 - synthetic no-SH and SH rendering on the forced WebGL backend;
 - the full-resolution 116,374-Gaussian Three.js Millipede SOG on both backends;
 - the public example's stationary suppression, deterministic motion/recovery,
-  backend switching, and structured telemetry on both backends;
+  backend switching, structured telemetry, and full-resolution
+  195,099-Gaussian Lion SH2 snapshot on both backends;
+- local-space SH evaluation for a rotated object and top-to-bottom WebGL center
+  indexing before Worker sorting;
 - known-value WebP data decoding.
 
 The r183 audit was intentionally treated as a negative boundary test. The scene

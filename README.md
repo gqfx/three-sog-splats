@@ -122,12 +122,13 @@ streaming boundaries.
 Run `npm run example`, then open
 `http://127.0.0.1:4173/webgpu_sog.html`. The public example follows the Three.js
 Gaussian Splatting example structure and loads the full Millipede SOG by
-default. Its controls switch the SOG source and reload the page with either the
-WebGPU or forced WebGL backend. **Start motion test** and **Stop motion test**
-provide repeatable full-resolution performance sampling without changing the
-active count. The overlay and structured state report frame percentiles, sort
-rate/count, viewport, DPR, and backend-specific sort timing. See
-[example notes](./examples/README.md).
+default. Its source control also offers the full 195,099-Gaussian Lion SH2 model
+from the Three.js example, converted without decimation, filtering, or SH-band
+reduction. The backend control reloads with either WebGPU or forced WebGL.
+**Start motion test** and **Stop motion test** provide repeatable full-resolution
+performance sampling without changing the active count. The overlay and
+structured state report frame percentiles, sort rate/count, viewport, DPR, and
+backend-specific sort timing. See [example notes](./examples/README.md).
 
 ## Development
 
@@ -144,6 +145,8 @@ npm run test:acceptance
 Synthetic fixtures are CC0 assets. Browser image baselines use tolerant
 comparisons for both backends and no-SH/SH variants. The browser suite also
 loads a full-resolution 116,374-Gaussian SOG directly converted from Three.js's
-CC BY 4.0 Millipede example through both backends. See
-[fixture attribution](./tests/fixtures/millipede.license.txt)
-and the [compatibility audit](./docs/three-compatibility.md).
+CC BY 4.0 Millipede example through both backends. The public-example tests also
+load and snapshot the complete 195,099-Gaussian Lion SH2 asset on both backends.
+See the [Millipede attribution](./tests/fixtures/millipede.license.txt),
+[Lion attribution](./tests/fixtures/lion.license.txt), and the
+[compatibility audit](./docs/three-compatibility.md).

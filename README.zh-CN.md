@@ -103,10 +103,11 @@ MVP 支持单个全资源 active range、SOG v2 stored/deflated ZIP、no-SH 和�
 运行 `npm run example` 后打开
 `http://127.0.0.1:4173/webgpu_sog.html`。公开示例沿用 Three.js Gaussian
 Splatting example 的页面结构，默认加载完整 Millipede SOG，并可切换 SOG 来源、
-WebGPU backend 或强制 WebGL backend。**Start motion test** / **Stop motion test**
-可在不改变 active count 的情况下重复采样全量模型性能；页面与结构化状态会报告
-帧耗时分位数、排序速率/总数、viewport、DPR 和 backend 对应的排序计时含义。
-参见[示例说明](./examples/README.md)。
+WebGPU backend 或强制 WebGL backend。来源列表还包含从 Three.js 示例直接转换的
+完整 195,099-Gaussian Lion SH2 模型；转换没有降采样、过滤或削减 SH 阶数。
+**Start motion test** / **Stop motion test** 可在不改变 active count 的情况下重复
+采样全量模型性能；页面与结构化状态会报告帧耗时分位数、排序速率/总数、viewport、
+DPR 和 backend 对应的排序计时含义。参见[示例说明](./examples/README.md)。
 
 ## 开发验证
 
@@ -122,6 +123,8 @@ npm run test:acceptance
 
 合成测试夹具采用 CC0；两种 backend 的 no-SH/SH 浏览器结果使用容差截图。
 浏览器套件还会在两种 backend 中加载一个从 Three.js CC BY 4.0 Millipede
-示例直接转换、未降采样的完整 116,374-Gaussian SOG。参见
-[夹具署名](./tests/fixtures/millipede.license.txt)
-与[兼容性审计](./docs/three-compatibility.md)。
+示例直接转换、未降采样的完整 116,374-Gaussian SOG；公开示例测试还会在两种
+backend 中加载并截图完整的 195,099-Gaussian Lion SH2 模型。参见
+[Millipede 夹具署名](./tests/fixtures/millipede.license.txt)、
+[Lion 夹具署名](./tests/fixtures/lion.license.txt)与
+[兼容性审计](./docs/three-compatibility.md)。

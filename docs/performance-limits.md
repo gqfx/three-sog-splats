@@ -56,7 +56,8 @@ browser environment:
 
 All WebGPU samples retained 116,374 active splats and zero readbacks. Forced
 WebGL retained its single preparation-time center readback. The complete r184
-and r185 nine-test browser matrices and existing full-fixture snapshots passed.
+and r185 nine-test browser matrices and full-fixture snapshots passed, including
+the public example's complete 195,099-Gaussian Lion SH2 source on both backends.
 Relative order inside one 16-bit depth bucket is unspecified; complete
 permutation, monotonic bucket order, and snapshot tolerances are the acceptance
 criteria for that approximation.

@@ -8,7 +8,18 @@ disposal of the current asset.
 
 The implementation is original to this package and uses `SOGLoader` plus
 `SOGGaussianSplatMesh` directly. It loads the full 116,374-Gaussian Millipede
-SOG by default and can switch between the WebGPU and forced WebGL backends.
+SOG by default. The optional SH source is the complete 195,099-Gaussian,
+two-band SH Lion model from the Three.js example, transcoded directly from SPZ
+v3 without decimation, filtering, or SH-band reduction. The small synthetic SH1
+fixture remains in `index.html` for deterministic shader tests and is not
+presented as a public model. The example can switch between the WebGPU and
+forced WebGL backends.
+
+The Lion fixture also exercises the production SOG v2 SH layout: its metadata
+declares a 65,536-entry, two-band palette and its centroid texture is
+512×1024. The loader derives this geometry from `shN.count` and `shN.bands`;
+the four-row synthetic fixture is not treated as a format-wide height rule.
+
 The overlay reports FPS, average and p95 frame time, CPU submission time, long
 frames, total sorts, and sorts per second. **Start motion test** applies a
 time-based orbit without changing the active splat count; **Stop motion test**
@@ -21,6 +32,7 @@ timing label.
 Design reference:
 
 - https://github.com/mrdoob/three.js/blob/07abea59aa700eed861f23ede39eaf3d892c93a4/examples/webgpu_gaussian_splatting.html
+- https://github.com/mrdoob/three.js/blob/6987fe81fb3f5c3f46648eee40c248406e846c3c/examples/models/spz/lion.v3.spz
 
 `index.html` remains the instrumented browser-test harness used for diagnostics,
 controlled sort verification, cancellation, and snapshot regression tests.
