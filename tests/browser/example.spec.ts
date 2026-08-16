@@ -155,7 +155,7 @@ for (const backend of ['webgpu', 'webgl'] as const) {
         errors.push(message.text());
       }
     });
-    await page.goto(`/webgpu_sog.html?source=millipede${backend === 'webgl' ? '&backend=webgl' : ''}`);
+    await page.goto(`/webgpu_sog.html?source=no-sh${backend === 'webgl' ? '&backend=webgl' : ''}`);
     await page.waitForFunction(() => ['ready', 'failed'].includes(window.__THREE_SOG_EXAMPLE__?.state));
     const initial = await page.evaluate(() => window.__THREE_SOG_EXAMPLE__);
     if (backend === 'webgpu' && (initial.state !== 'ready' || initial.backend !== 'webgpu')) {
@@ -163,8 +163,9 @@ for (const backend of ['webgpu', 'webgl'] as const) {
     }
     expect(initial.state, initial.error ?? undefined).toBe('ready');
     expect(initial.backend).toBe(backend);
-    expect(initial.source).toBe('millipede');
+    expect(initial.source).toBe('no-sh');
     expect(initial.splatCount).toBe(116_374);
+    await expect(page.locator('#source')).toHaveValue('no-sh');
     await expect(page.locator('#status')).toContainText('116,374 splats');
     await expect(page.locator('#license')).toContainText('Fabian Plum');
     await page.evaluate(() => window.__THREE_SOG_EXAMPLE__.resetPerformance());
@@ -183,6 +184,18 @@ for (const backend of ['webgpu', 'webgl'] as const) {
       () => window.__THREE_SOG_EXAMPLE__.performance?.sortsPerSecond,
     )).toBe(0);
     await expect(page.locator('#performance-summary')).toContainText('FPS');
+
+    const overlays = page.locator('#info, #controls, #diagnostics');
+    await overlays.evaluateAll((elements) => {
+      for (const element of elements) (element as HTMLElement).style.visibility = 'hidden';
+    });
+    await expect(page.locator('canvas')).toHaveScreenshot(`${backend}-public-no-sh.png`, {
+      maxDiffPixelRatio: 0.025,
+      threshold: 0.25,
+    });
+    await overlays.evaluateAll((elements) => {
+      for (const element of elements) (element as HTMLElement).style.visibility = '';
+    });
 
     const idleSortCount = await page.evaluate(() => window.__THREE_SOG_EXAMPLE__.totalSortCount);
     await page.evaluate(() => window.__THREE_SOG_EXAMPLE__.startCameraMotion());
@@ -213,7 +226,6 @@ for (const backend of ['webgpu', 'webgl'] as const) {
     await expect.poll(() => page.evaluate(
       () => window.__THREE_SOG_EXAMPLE__.performance?.sortsPerSecond,
     )).toBe(0);
-    const overlays = page.locator('#info, #controls, #diagnostics');
     await overlays.evaluateAll((elements) => {
       for (const element of elements) (element as HTMLElement).style.visibility = 'hidden';
     });
@@ -232,7 +244,9 @@ for (const backend of ['webgpu', 'webgl'] as const) {
     });
     const replaced = await page.evaluate(() => window.__THREE_SOG_EXAMPLE__);
     expect(replaced.backend).toBe(backend);
-    expect(replaced.splatCount).toBe(4);
+    expect(replaced.splatCount).toBe(116_374);
+    await expect(page.locator('#status')).toContainText('116,374 splats');
+    await expect(page.locator('#license')).toContainText('Fabian Plum');
     expect(errors).toEqual([]);
   });
 }

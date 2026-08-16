@@ -11,7 +11,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SOGGaussianSplatMesh, SOGLoader } from '../src/index.js';
 import type { SOGResource } from '../src/index.js';
 
-type SourceKey = 'millipede' | 'no-sh' | 'sh';
+type SourceKey = 'no-sh' | 'sh';
 
 interface FramePerformanceMetrics {
   readonly backend: string | null;
@@ -69,8 +69,8 @@ declare global {
 }
 
 const sources: Record<SourceKey, SourceDefinition> = {
-  millipede: {
-    name: 'Millipede · full 116K',
+  'no-sh': {
+    name: 'Millipede · full 116K · no SH',
     url: '/millipede.sog',
     cameraDirection: new Vector3(0, 0.4, 1),
     rotation: new Euler(Math.PI * 1.1, -Math.PI * 0.1, Math.PI * 0.15),
@@ -81,12 +81,6 @@ const sources: Record<SourceKey, SourceDefinition> = {
       license: 'CC BY 4.0',
       licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
     },
-  },
-  'no-sh': {
-    name: 'Synthetic · no SH',
-    url: '/minimal-no-sh.sog',
-    cameraDirection: new Vector3(0.35, 0.25, 4),
-    scale: 0.35,
   },
   sh: {
     name: 'Lion · full 195K · SH2',
@@ -105,9 +99,7 @@ const sources: Record<SourceKey, SourceDefinition> = {
 
 const parameters = new URLSearchParams(location.search);
 const requestedSource = parameters.get('source');
-const initialSource: SourceKey = requestedSource && requestedSource in sources
-  ? requestedSource as SourceKey
-  : 'millipede';
+const initialSource: SourceKey = requestedSource === 'sh' ? 'sh' : 'no-sh';
 const forceWebGL = parameters.get('backend') === 'webgl';
 const status = document.querySelector<HTMLElement>('#status')!;
 const performanceSummary = document.querySelector<HTMLElement>('#performance-summary')!;
