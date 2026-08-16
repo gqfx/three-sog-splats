@@ -1,4 +1,5 @@
 import {
+  Box3,
   DataTexture,
   FloatType,
   InstancedBufferGeometry,
@@ -32,7 +33,7 @@ import {
 } from './material.js';
 import type { SOGMaterialTextures } from './material.js';
 import { SOGRenderStore } from './SOGRenderStore.js';
-import { ParallelGpuSorter } from './sort/ParallelGpuSorter.js';
+import { GpuRadixSorter } from './sort/GpuRadixSorter.js';
 import { WebGLSortBackend } from './sort/WebGLSortBackend.js';
 
 const now = (): number => globalThis.performance?.now() ?? Date.now();
@@ -252,16 +253,24 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
         ...(textureMap.get('shN_labels') ? { shLabels: textureMap.get('shN_labels')! } : {}),
       };
 
-      let gpuSorter: ParallelGpuSorter | undefined;
+      let gpuSorter: GpuRadixSorter | undefined;
       let webglSorter: WebGLSortBackend | undefined;
       if (backend === 'webgpu') {
-        gpuSorter = new ParallelGpuSorter(
+        gpuSorter = await GpuRadixSorter.create(
+          renderer,
           this.#source.count,
           { meansLow, meansHigh, width: meansImage.width },
           new Vector3(...this.#source.meta.means.mins),
           new Vector3(...this.#source.meta.means.maxs),
+          new Box3(
+            new Vector3(...this.#source.bounds.min),
+            new Vector3(...this.#source.bounds.max),
+          ),
         );
         cleanup.defer(() => gpuSorter?.dispose());
+        this.#diagnostics.radixBackend = gpuSorter.kind;
+        this.#diagnostics.radixBits = gpuSorter.bits;
+        this.#diagnostics.radixSelectionReason = gpuSorter.selectionReason;
         gpuSorter.updateViewMatrix(new Matrix4());
         const sortStartedAt = now();
         await gpuSorter.sortAsync(renderer);
@@ -319,9 +328,7 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
       this.#diagnostics.allocatedGpuBytes = (gpuSorter?.allocatedBytes ?? webglSorter?.gpuAllocatedBytes ?? 0)
         + nativeTextureBytes
         + (256 * 4 * 4);
-      this.#diagnostics.allocatedCpuBytes = gpuSorter?.allocatedBytes
-        ?? webglSorter?.cpuAllocatedBytes
-        ?? 0;
+      this.#diagnostics.allocatedCpuBytes = webglSorter?.cpuAllocatedBytes ?? 0;
 
       const compileStartedAt = now();
       this.geometry.dispose();

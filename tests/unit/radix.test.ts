@@ -1,6 +1,5 @@
-import { Matrix4, Texture, Vector3 } from 'three/webgpu';
-import type { WebGPURenderer } from 'three/webgpu';
-import { describe, expect, it, vi } from 'vitest';
+import { Matrix4 } from 'three/webgpu';
+import { describe, expect, it } from 'vitest';
 import {
   DEPTH_BUCKET_COUNT,
   createDepthBuckets,
@@ -11,7 +10,6 @@ import {
   orderedUintToDepthBucket,
 } from '../../src/render/sort/depth.js';
 import { radixSortIndices } from '../../src/render/sort/radix.js';
-import { ParallelGpuSorter, parallelSortAllocationBytes } from '../../src/render/sort/ParallelGpuSorter.js';
 
 describe('portable radix sort oracle', () => {
   it.each([0, 1, 3, 255, 256, 257, 1023])('sorts a %s-element non/power-of-two input stably', (count) => {
@@ -71,41 +69,4 @@ describe('portable radix sort oracle', () => {
     expect(isCompleteMonotonicBucketOrder(buckets, order)).toBe(true);
   });
 
-  it.each([
-    [0, 524_296],
-    [1, 524_296],
-    [3, 524_312],
-    [116_374, 1_455_280],
-    [2_000_000, 16_524_288],
-  ])('accounts for exact-size parallel GPU sort storage for %s splats', (count, expected) => {
-    expect(parallelSortAllocationBytes(count)).toBe(expected);
-  });
-
-  it('preserves synchronous and asynchronous sorter entry points and disposes idempotently', async () => {
-    const meansLow = new Texture();
-    const meansHigh = new Texture();
-    const sorter = new ParallelGpuSorter(
-      3,
-      { meansLow, meansHigh, width: 3 },
-      new Vector3(-1, -1, -1),
-      new Vector3(1, 1, 1),
-    );
-    const compute = vi.fn();
-    const computeAsync = vi.fn().mockResolvedValue(undefined);
-    const renderer = { compute, computeAsync } as unknown as WebGPURenderer;
-
-    sorter.sort(renderer);
-    await sorter.sortAsync(renderer);
-
-    expect(compute).toHaveBeenCalledOnce();
-    expect(compute.mock.calls[0]?.[0]).toHaveLength(4);
-    expect(computeAsync).toHaveBeenCalledOnce();
-    expect(computeAsync.mock.calls[0]?.[0]).toHaveLength(4);
-    expect(sorter.orderAttribute.count).toBe(3);
-    expect(sorter.bucketAttribute.count).toBe(3);
-    expect(() => {
-      sorter.dispose();
-      sorter.dispose();
-    }).not.toThrow();
-  });
 });

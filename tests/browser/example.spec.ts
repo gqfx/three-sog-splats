@@ -37,6 +37,8 @@ for (const fixture of ['no-sh', 'sh'] as const) {
     const snapshot = await page.evaluate(() => window.__SOG_EXAMPLE__);
     expect(snapshot.backend).toBe('webgl');
     expect(snapshot.diagnostics?.readbackCount).toBe(1);
+    expect(snapshot.diagnostics?.radixBackend).toBeNull();
+    expect(snapshot.diagnostics?.radixBits).toBe(0);
     expect(snapshot.diagnostics?.deferredUploadCount).toBe(0);
     expect(snapshot.diagnostics?.deferredCompileCount).toBe(0);
     expect(errors).toEqual([]);
@@ -81,6 +83,9 @@ for (const fixture of ['no-sh', 'sh'] as const) {
     if (snapshot.state !== 'ready' || snapshot.backend !== 'webgpu') test.skip(true, 'WebGPU is unavailable in this browser environment.');
     await page.waitForFunction(() => (window.__SOG_EXAMPLE__?.diagnostics?.firstVisibleFrameDurationMs ?? 0) > 0);
     expect(snapshot.diagnostics?.readbackCount).toBe(0);
+    expect(snapshot.diagnostics?.radixBackend).toMatch(/^(portable|onesweep)$/);
+    expect(snapshot.diagnostics?.radixBits).toBeGreaterThanOrEqual(12);
+    expect(snapshot.diagnostics?.radixSelectionReason).not.toBeNull();
     expect(snapshot.diagnostics?.activeSplatCount).toBe(4);
     if (fixture === 'no-sh') {
       const verification = await page.evaluate(() => window.__SOG_EXAMPLE__.verifyGpuSort());

@@ -97,8 +97,9 @@ document.querySelector('#app')!.textContent = [
     .filter((file) => file.endsWith('.js'))
     .map((file) => readFile(resolve(distRoot, file), 'utf8')));
   const output = javascript.join('\n');
+  const executableOutput = output.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
   for (const forbidden of ['playcanvas', 'potree-engine', 'three/src/', 'three/build/']) {
-    if (output.toLowerCase().includes(forbidden)) {
+    if (executableOutput.toLowerCase().includes(forbidden)) {
       throw new Error(`Distribution contains forbidden runtime/reference code: ${forbidden}`);
     }
   }

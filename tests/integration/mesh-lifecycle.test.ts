@@ -12,6 +12,7 @@ function fakeRenderer(): WebGPURenderer {
     init: vi.fn(async () => {}),
     initTexture: vi.fn(),
     compileAsync: vi.fn(async () => {}),
+    hasFeature: vi.fn(() => false),
     compute: vi.fn(),
     computeAsync: vi.fn(async () => {}),
     info: { memory: { textures: 6, programs: 2 } },
@@ -36,7 +37,12 @@ describe('SOGGaussianSplatMesh lifecycle', () => {
     expect(mesh.state).toBe('ready');
     expect(mesh.visible).toBe(true);
     expect(mesh.diagnostics.backend).toBe('webgpu');
+    expect(mesh.diagnostics.radixBackend).toBe('portable');
+    expect(mesh.diagnostics.radixBits).toBe(12);
+    expect(mesh.diagnostics.radixSelectionReason).toBe('subgroups-unavailable');
     expect(mesh.diagnostics.readbackCount).toBe(0);
+    expect(mesh.diagnostics.activeSplatCount).toBe(4);
+    expect(mesh.diagnostics.allocatedCpuBytes).toBe(0);
     expect(renderer.init).toHaveBeenCalledTimes(1);
     expect(renderer.initTexture).toHaveBeenCalledTimes(6);
     const camera = new PerspectiveCamera();
@@ -46,6 +52,10 @@ describe('SOGGaussianSplatMesh lifecycle', () => {
     const countAfterFirstCamera = mesh.diagnostics.sortCount;
     mesh.onBeforeRender(renderer as never, mesh as never, camera, mesh.geometry, mesh.material, null as never);
     expect(mesh.diagnostics.sortCount).toBe(countAfterFirstCamera);
+    camera.position.z += 0.001;
+    camera.updateMatrixWorld();
+    mesh.onBeforeRender(renderer as never, mesh as never, camera, mesh.geometry, mesh.material, null as never);
+    expect(mesh.diagnostics.sortCount).toBe(countAfterFirstCamera + 1);
     expect(mesh.diagnostics.firstVisibleFrameDurationMs).toBeGreaterThan(0);
     expect(mesh.diagnostics.deferredUploadCount).toBe(0);
     expect(mesh.diagnostics.deferredCompileCount).toBe(0);

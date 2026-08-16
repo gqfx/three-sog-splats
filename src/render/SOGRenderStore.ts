@@ -9,7 +9,7 @@ import type {
   SOGAttributeName,
   SOGBackendKind,
 } from '../core/types.js';
-import type { ParallelGpuSorter } from './sort/ParallelGpuSorter.js';
+import type { GpuRadixSorter } from './sort/GpuRadixSorter.js';
 import type { WebGLSortBackend } from './sort/WebGLSortBackend.js';
 
 export class SOGRenderStore {
@@ -18,7 +18,7 @@ export class SOGRenderStore {
   readonly codebook: Texture;
   readonly geometry: InstancedBufferGeometry;
   readonly material: NodeMaterial;
-  readonly gpuSorter?: ParallelGpuSorter;
+  readonly gpuSorter?: GpuRadixSorter;
   readonly webglSorter?: WebGLSortBackend;
   readonly activeRange: SOGActiveRange;
   #disposed = false;
@@ -29,7 +29,7 @@ export class SOGRenderStore {
     codebook: Texture;
     geometry: InstancedBufferGeometry;
     material: NodeMaterial;
-    gpuSorter?: ParallelGpuSorter;
+    gpuSorter?: GpuRadixSorter;
     webglSorter?: WebGLSortBackend;
     count: number;
     matrix: Matrix4;
