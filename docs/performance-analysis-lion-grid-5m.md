@@ -38,21 +38,23 @@ have per-copy cache entries.
    are scattered as a stable subsequence.
 8. A five-word indexed-indirect command draws only the GPU-produced survivor
    count. Stationary frames run neither projection nor culling compute.
+9. Cached RGBA quantization uses an explicit `uvec4` conversion before bit
+   packing, preserving independent red, green, blue, and alpha channels.
 
 ## Controlled result
 
 | Probe | Logical | GPU-visible | Median GPU render | P95 | Actual splat triangles |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Empty | 0 | 0 | 1.0 ms proxy | — | 0 |
-| Ramp | 100,000 | 11,629 | 2.1 ms | 4.7 ms | 23,258 |
-| Ramp | 500,000 | 45,495 | 4.8 ms | 7.7 ms | 90,990 |
-| Ramp | 1,000,000 | 86,668 | 8.7 ms | 9.6 ms | 173,336 |
-| Ramp | 2,000,000 | 168,830 | 10.7 ms | 17.8 ms | 337,660 |
-| Full grid, threshold 1 | 4,877,475 | 370,180 | 21.7 ms | 26.4 ms | 740,360 |
-| Full grid, culling disabled | 4,877,475 | 4,877,475 | 130.9 ms | 166.8 ms | 9,754,950 |
-| Half DPR, area-scaled threshold | 4,877,475 | 370,180 | 18.5 ms | 29.2 ms | 740,360 |
-| Quarter DPR, area-scaled threshold | 4,877,475 | 370,180 | 9.6 ms | 10.0 ms | 740,360 |
-| Quarter scale, area-scaled threshold | 4,877,475 | 350,673 | 11.9 ms | 14.2 ms | 701,346 |
+| Empty | 0 | 0 | 1.1 ms proxy | — | 0 |
+| Ramp | 100,000 | 8,018 | 2.0 ms | 4.6 ms | 16,036 |
+| Ramp | 500,000 | 30,283 | 3.4 ms | 3.9 ms | 60,566 |
+| Ramp | 1,000,000 | 55,654 | 4.7 ms | 8.5 ms | 111,308 |
+| Ramp | 2,000,000 | 107,466 | 9.5 ms | 18.1 ms | 214,932 |
+| Full grid, threshold 1 | 4,877,475 | 243,357 | 18.9 ms | 26.1 ms | 486,714 |
+| Full grid, culling disabled | 4,877,475 | 4,877,475 | 147.7 ms | 166.2 ms | 9,754,950 |
+| Half DPR, area-scaled threshold | 4,877,475 | 243,357 | 18.0 ms | 27.1 ms | 486,714 |
+| Quarter DPR, area-scaled threshold | 4,877,475 | 243,357 | 11.3 ms | 12.3 ms | 486,714 |
+| Quarter scale, area-scaled threshold | 4,877,475 | 234,275 | 12.5 ms | 14.7 ms | 468,550 |
 
 The live loop reached the page's 60 FPS display ceiling (59.7 FPS sampled).
 Three reported about 227.8 MB of tracked renderer memory; library diagnostics
@@ -61,16 +63,16 @@ cache is the visible-index and compact block/scan storage, not decompressed
 source copies.
 
 At the conservative default threshold of 1, explicit telemetry reported
-370,180 visible splats, 497,483 camera/alpha rejections, zero off-screen
-rejections for the fitted grid, and 4,009,812 low-contribution rejections. The
-categories sum exactly to 4,877,475. The same-view profiler measured 21.7 ms
-with culling and 130.9 ms with culling disabled, a 109.2 ms median GPU saving.
+243,357 visible splats, 31,100 camera/alpha rejections, zero off-screen
+rejections for the fitted grid, and 4,603,018 low-contribution rejections. The
+categories sum exactly to 4,877,475. The same-view profiler measured 18.9 ms
+with culling and 147.7 ms with culling disabled, a 128.8 ms median GPU saving.
 
-The camera-change probe measured 11.7 ms median GPU compute across the shared
+The camera-change probe measured 11.8 ms median GPU compute across the shared
 radix sort, 4,877,475-entry projection/SH refresh, classification, scan, and
 stable scatter. Stationary frames
 reported zero compute passes. Preparation-time static dequantization took about
-4.4 ms and projection-pipeline warmup about 19.5 ms in the sampled run; archive
+4.2 ms and projection-pipeline warmup about 31.8 ms in the sampled run; archive
 and WebP decode remain one-time loader work.
 
 ## Before/after
@@ -78,18 +80,18 @@ and WebP decode remain one-time loader work.
 | Metric | Before | After | Change |
 | --- | ---: | ---: | ---: |
 | Live FPS | about 5.1 | 59.7 (display ceiling) | about 11.7× |
-| Full GPU render | 247.9–252.0 ms | 21.7 ms | about −91% |
+| Full GPU render | 247.9–252.0 ms | 18.9 ms | about −92.4% |
 | Draw calls | 51 | 2 | −96% |
-| Actual splat triangles | 19,509,900 | 740,360 | −96.2% |
-| Estimated splat vertex invocations | 58,529,700 | 1,480,720 | −97.5% |
-| Resolution-independent proxy | 139.1 ms | 11.0 ms | −92.1% |
-| Fragment/overdraw proxy | 106.7 ms | 10.4 ms | −90.3% |
-| Camera-change compute | 0.3 ms sort only | 11.7 ms sort + projection/SH + cull/compact | conditional tradeoff |
+| Actual splat triangles | 19,509,900 | 486,714 | −97.5% |
+| Estimated splat vertex invocations | 58,529,700 | 973,428 | −98.3% |
+| Resolution-independent proxy | 139.1 ms | 12.3 ms | −91.2% |
+| Fragment/overdraw proxy | 106.7 ms | 6.1 ms | −94.3% |
+| Camera-change compute | 0.3 ms sort only | 11.8 ms sort + projection/SH + cull/compact | conditional tradeoff |
 | Tracked renderer memory | 55.1 MB | 227.8 MB | +172.7 MB caches/compaction |
 
 This confirms the original diagnosis: decompression was never a per-frame
 cost. Static decode, projection, and stable compaction occur only when their
 inputs change; the stationary indexed-indirect draw now avoids low-contribution
-vertex and fragment work. The remaining measured costs are roughly balanced
-between cached screen-space fetch/quad expansion (11.0 ms proxy) and
-fragment/blending work (10.4 ms proxy).
+vertex and fragment work. The largest remaining measured cost is cached
+screen-space fetch/quad expansion (12.3 ms proxy), followed by
+fragment/blending work (6.1 ms proxy).

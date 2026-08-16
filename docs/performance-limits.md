@@ -83,12 +83,12 @@ vertices only fetch that cached data. Transparent Gaussian sprites also use one
 DoubleSide pass and four indexed quad vertices.
 
 For the 4,877,475-splat Lion grid at 1280×720 DPR 2, stable contribution
-compaction at the conservative threshold of 1 retained 370,180 logical splats
-and drove an indexed-indirect draw containing 740,360 splat triangles. Median
-GPU render measured 21.7 ms versus 130.9 ms with contribution culling disabled;
+compaction at the conservative threshold of 1 retained 243,357 logical splats
+and drove an indexed-indirect draw containing 486,714 splat triangles. Median
+GPU render measured 18.9 ms versus 147.7 ms with contribution culling disabled;
 the live loop reached its 60 FPS display ceiling. Camera-change sort,
 projection/SH refresh, classification, scan, and stable scatter measured
-11.7 ms and were absent on stationary frames. Tracked renderer memory was about
+11.8 ms and were absent on stationary frames. Tracked renderer memory was about
 227.8 MB, including roughly 19.8 MB for visible indices and compact scan data.
 A single five-million-unique-splat resource is not admitted to the projected
 cache, avoiding hundreds of megabytes of storage with little benefit in the

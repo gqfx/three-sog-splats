@@ -23,6 +23,46 @@ async function waitForStableSort(page: Page): Promise<number> {
   throw new Error('SOG sort count did not become stable.');
 }
 
+async function measureCanvasChromaticity(page: Page): Promise<{
+  foregroundPixels: number;
+  chromaticPixels: number;
+  chromaticRatio: number;
+  maximumChannelSpread: number;
+}> {
+  const screenshot = await page.locator('canvas').screenshot();
+  return page.evaluate(async (encodedScreenshot) => {
+    const image = new Image();
+    image.src = `data:image/png;base64,${encodedScreenshot}`;
+    await image.decode();
+    const copy = document.createElement('canvas');
+    copy.width = image.naturalWidth;
+    copy.height = image.naturalHeight;
+    const context = copy.getContext('2d', { willReadFrequently: true })!;
+    context.drawImage(image, 0, 0);
+    const pixels = context.getImageData(0, 0, copy.width, copy.height).data;
+    let foregroundPixels = 0;
+    let chromaticPixels = 0;
+    let maximumChannelSpread = 0;
+    for (let offset = 0; offset < pixels.length; offset += 4) {
+      const red = pixels[offset]!;
+      const green = pixels[offset + 1]!;
+      const blue = pixels[offset + 2]!;
+      const maximum = Math.max(red, green, blue);
+      if (maximum < 24) continue;
+      foregroundPixels += 1;
+      const spread = maximum - Math.min(red, green, blue);
+      maximumChannelSpread = Math.max(maximumChannelSpread, spread);
+      if (spread >= 8) chromaticPixels += 1;
+    }
+    return {
+      foregroundPixels,
+      chromaticPixels,
+      chromaticRatio: foregroundPixels > 0 ? chromaticPixels / foregroundPixels : 0,
+      maximumChannelSpread,
+    };
+  }, screenshot.toString('base64'));
+}
+
 for (const fixture of ['no-sh', 'sh'] as const) {
   test(`forced WebGL backend renders ${fixture}`, async ({ page }) => {
     const errors: string[] = [];
@@ -255,6 +295,12 @@ for (const backend of ['webgpu', 'webgl'] as const) {
       () => window.__THREE_SOG_EXAMPLE__.performance?.sortsPerSecond,
     )).toBe(0);
     await expect(page.locator('#performance-summary')).toContainText('FPS');
+    if (backend === 'webgpu') {
+      const chromaticity = await measureCanvasChromaticity(page);
+      expect(chromaticity.foregroundPixels).toBeGreaterThan(1_000);
+      expect(chromaticity.chromaticRatio).toBeGreaterThan(0.05);
+      expect(chromaticity.maximumChannelSpread).toBeGreaterThan(20);
+    }
 
     const overlays = page.locator('#info, #controls, #diagnostics');
     await overlays.evaluateAll((elements) => {

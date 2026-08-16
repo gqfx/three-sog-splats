@@ -25,7 +25,7 @@ Release validation is run with `npm run test:acceptance`, which includes the
 browser and external-consumer gates. The final command record is updated
 whenever the compatibility baseline or fixture output changes.
 
-Final run: typecheck, lint, declaration and example builds, 110 unit/integration
+Final run: typecheck, lint, declaration and example builds, 111 unit/integration
 tests, 13 real-browser tests on both r184 and r185, and the external
 package-consumer check all passed. The browser run exercised WebGPU and forced
 WebGL for internal synthetic no-SH/SH fixtures and the full-resolution
@@ -36,12 +36,15 @@ filtering, or SH-band reduction.
 
 The WebGPU browser run also constructed a 5×5 Lion grid with 4,877,475 logical
 splats from one `/lion.sog` request and one prepared GPU payload. It verified 25
-runtime copies batched into one splat draw, 2 full-frame draw calls, 9,754,951
-triangles, zero stationary compute passes, no expanded grid fixture request,
+runtime copies batched into one splat draw, 2 full-frame draw calls, 486,714
+actual visible triangles at the default threshold, zero stationary compute
+passes, no expanded grid fixture request,
 and successful controlled full/half/quarter-DPR plus contribution-culling on/off
-profiling. Default threshold 1 submitted 370,180 survivors; explicit counters
-partitioned all 4,877,475 logical splats. The full-view A/B measured 21.7 ms
-with stable compaction and 130.9 ms with culling disabled.
+profiling. Default threshold 1 submitted 243,357 survivors; explicit counters
+partitioned all 4,877,475 logical splats. The full-view A/B measured 18.9 ms
+with stable compaction and 147.7 ms with culling disabled. Browser acceptance
+also verifies that cached WebGPU RGBA packing retains independent color
+channels rather than collapsing the rendered model to grayscale.
 
 The local Chrome adapter was not an admitted NVIDIA target. Its OneSweep
 result is therefore explicitly hardware-conditioned: source/API compilation

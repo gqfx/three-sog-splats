@@ -46,7 +46,7 @@ import { SOGContributionCuller } from './SOGContributionCuller.js';
 const WORKGROUP_SIZE = 256;
 
 function packColor(color: any): any {
-  const encoded: any = uint(clamp(color, 0, 1).mul(255).round() as any) as any;
+  const encoded: any = uvec4(clamp(color, 0, 1).mul(255).round() as any) as any;
   return encoded.x
     .bitOr(encoded.y.shiftLeft(uint(8)))
     .bitOr(encoded.z.shiftLeft(uint(16)))

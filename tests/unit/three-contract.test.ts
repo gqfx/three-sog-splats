@@ -54,4 +54,13 @@ describe('Three.js r184-r185 public API contract', () => {
       expect(source, file).not.toMatch(/three\/build\//);
     }
   });
+
+  it('keeps cached RGBA quantization vector-typed before bit packing', async () => {
+    const source = await readFile(resolve(
+      import.meta.dirname,
+      '../../src/render/SOGWebGPUCache.ts',
+    ), 'utf8');
+    expect(source).toContain('uvec4(clamp(color, 0, 1).mul(255).round()');
+    expect(source).not.toContain('uint(clamp(color, 0, 1).mul(255).round()');
+  });
 });
