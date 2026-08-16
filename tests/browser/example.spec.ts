@@ -322,6 +322,47 @@ for (const backend of ['webgpu', 'webgl'] as const) {
   });
 }
 
+test('controlled profiler isolates render, resolution, and camera-sort stages', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.goto('/webgpu_sog.html?source=no-sh');
+  await page.waitForFunction(() => ['ready', 'failed'].includes(window.__THREE_SOG_EXAMPLE__?.state));
+  const initial = await page.evaluate(() => window.__THREE_SOG_EXAMPLE__);
+  if (initial.state !== 'ready' || initial.backend !== 'webgpu') {
+    test.skip(true, 'WebGPU is unavailable in this browser environment.');
+  }
+
+  await page.getByRole('button', { name: 'Analyze bottleneck' }).click();
+  await page.waitForFunction(() => (
+    ['complete', 'failed'].includes(window.__THREE_SOG_EXAMPLE__?.analysisState)
+  ));
+  const result = await page.evaluate(() => ({
+    state: window.__THREE_SOG_EXAMPLE__.state,
+    analysisState: window.__THREE_SOG_EXAMPLE__.analysisState,
+    analysis: window.__THREE_SOG_EXAMPLE__.analysis,
+    methodType: typeof window.__THREE_SOG_EXAMPLE__.runBottleneckAnalysis,
+  }));
+
+  expect(result.state).toBe('ready');
+  expect(result.analysisState).toBe('complete');
+  expect(result.methodType).toBe('function');
+  expect(result.analysis?.splatCount).toBe(116_374);
+  expect(result.analysis?.scenarios.map((scenario) => scenario.id)).toEqual(expect.arrayContaining([
+    'empty',
+    'full',
+    'half-resolution',
+    'quarter-resolution',
+    'quarter-scale',
+  ]));
+  const full = result.analysis?.scenarios.find((scenario) => scenario.id === 'full');
+  expect(full?.instanceCount).toBe(116_374);
+  expect(full?.drawCalls).toBeGreaterThan(0);
+  expect(full?.triangles).toBeGreaterThan(116_374 * 2);
+  expect(result.analysis?.findings.length).toBeGreaterThan(0);
+  await expect(page.getByRole('button', { name: 'Analyze bottleneck' })).toBeEnabled();
+  expect(errors).toEqual([]);
+});
+
 test('decodes known WebP values without browser image transformations', async ({ page }) => {
   await page.goto('/');
   await page.waitForFunction(() => window.__SOG_EXAMPLE__?.state === 'ready');

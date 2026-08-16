@@ -61,6 +61,12 @@ a:hover { text-decoration: underline; }
   font-variant-numeric: tabular-nums;
 }
 
+#analysis-summary {
+  max-width: 720px;
+  color: #f1c77d !important;
+  font-variant-numeric: tabular-nums;
+}
+
 #controls {
   position: fixed;
   z-index: 3;
@@ -102,6 +108,11 @@ a:hover { text-decoration: underline; }
 }
 
 #controls button:hover { background: #363a44; }
+
+#controls button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
 
 #diagnostics {
   position: fixed;

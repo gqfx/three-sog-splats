@@ -25,14 +25,23 @@ declares a 65,536-entry, two-band palette and its centroid texture is
 512×1024. The loader derives this geometry from `shN.count` and `shN.bands`;
 the four-row synthetic fixture is not treated as a format-wide height rule.
 
-The overlay reports FPS, average and p95 frame time, CPU submission time, long
-frames, total sorts, and sorts per second. **Start motion test** applies a
+The overlay reports FPS, average and p95 frame time, CPU submission time, GPU
+render/compute timestamps, draw calls, triangles, renderer memory, long frames,
+total sorts, and sorts per second. **Start motion test** applies a
 time-based orbit without changing the active splat count; **Stop motion test**
 ends it immediately because the example deliberately disables frame-dependent
 damping. A structured snapshot is logged every five seconds and exposed on
 `window.__THREE_SOG_EXAMPLE__`, including backend, active count, viewport, DPR,
 frame distribution, and an explicit CPU-submission versus Worker-execution sort
 timing label.
+
+**Analyze bottleneck** pauses the animation loop and runs a controlled profile:
+an empty pass, increasing instance counts, full/half/quarter DPR, quarter model
+scale, and a camera-change sort with only one rendered instance. It uses Three's
+public timestamp-query API and restores the exact camera, mesh, DPR, motion, and
+animation state afterward. The report is shown in the diagnostics overlay and
+available from `window.__THREE_SOG_EXAMPLE__.analysis`; automation can also call
+and await `window.__THREE_SOG_EXAMPLE__.runBottleneckAnalysis()`.
 
 Design reference:
 

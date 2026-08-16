@@ -1,15 +1,23 @@
 import {
   Color,
+  DoubleSide,
   Euler,
   MathUtils,
   PerspectiveCamera,
   Scene,
+  TimestampQuery,
   Vector3,
   WebGPURenderer,
 } from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SOGGaussianSplatMesh, SOGLoader } from '../src/index.js';
 import type { SOGResource } from '../src/index.js';
+import {
+  deriveBottleneckFindings,
+  type BottleneckAnalysis,
+  type BottleneckScenario,
+  type BottleneckSortMeasurement,
+} from './bottleneck-analysis.js';
 
 type SourceKey = 'no-sh' | 'sh' | 'stress-5m';
 
@@ -31,6 +39,14 @@ interface FramePerformanceMetrics {
   readonly sortsPerSecond: number;
   readonly sortDurationMs: number;
   readonly sortDurationKind: 'cpu-command-submission' | 'worker-execution' | null;
+  readonly gpuTimestampSupported: boolean;
+  readonly latestGpuRenderMs: number | null;
+  readonly latestGpuComputeMs: number | null;
+  readonly gpuTimestampSampleAgeMs: number | null;
+  readonly drawCalls: number;
+  readonly triangles: number;
+  readonly computePasses: number;
+  readonly rendererMemoryBytes: number;
   readonly viewport: {
     readonly width: number;
     readonly height: number;
@@ -62,11 +78,19 @@ declare global {
       splatCount: number;
       totalSortCount: number;
       performance: FramePerformanceMetrics | null;
+      analysisState: 'idle' | 'running' | 'complete' | 'failed';
+      analysisProgress: {
+        readonly completed: number;
+        readonly total: number;
+        readonly stage: string;
+      } | null;
+      analysis: BottleneckAnalysis | null;
       motion: 'idle' | 'orbit';
       error: string | null;
       startCameraMotion(): void;
       stopCameraMotion(): void;
       resetPerformance(): void;
+      runBottleneckAnalysis(): Promise<BottleneckAnalysis>;
     };
   }
 }
@@ -113,11 +137,13 @@ const initialSource: SourceKey = requestedSource === 'sh' || requestedSource ===
 const forceWebGL = parameters.get('backend') === 'webgl';
 const status = document.querySelector<HTMLElement>('#status')!;
 const performanceSummary = document.querySelector<HTMLElement>('#performance-summary')!;
+const analysisSummary = document.querySelector<HTMLElement>('#analysis-summary')!;
 const license = document.querySelector<HTMLElement>('#license')!;
 const diagnostics = document.querySelector<HTMLElement>('#diagnostics')!;
 const sourceSelect = document.querySelector<HTMLSelectElement>('#source')!;
 const backendSelect = document.querySelector<HTMLSelectElement>('#backend')!;
 const motionButton = document.querySelector<HTMLButtonElement>('#motion')!;
+const analysisButton = document.querySelector<HTMLButtonElement>('#analyze')!;
 
 const exampleState: Window['__THREE_SOG_EXAMPLE__'] = window.__THREE_SOG_EXAMPLE__ = {
   state: 'initializing',
@@ -126,11 +152,17 @@ const exampleState: Window['__THREE_SOG_EXAMPLE__'] = window.__THREE_SOG_EXAMPLE
   splatCount: 0,
   totalSortCount: 0,
   performance: null,
+  analysisState: 'idle',
+  analysisProgress: null,
+  analysis: null,
   motion: 'idle',
   error: null,
   startCameraMotion: () => {},
   stopCameraMotion: () => {},
   resetPerformance: () => {},
+  runBottleneckAnalysis: async () => {
+    throw new Error('Bottleneck analysis is not initialized yet.');
+  },
 };
 
 sourceSelect.value = initialSource;
@@ -146,7 +178,7 @@ backendSelect.addEventListener('change', () => {
 const scene = new Scene();
 scene.background = new Color(0x07080f);
 const camera = new PerspectiveCamera(50, innerWidth / innerHeight, 0.001, 100);
-const renderer = new WebGPURenderer({ antialias: true, forceWebGL });
+const renderer = new WebGPURenderer({ antialias: true, forceWebGL, trackTimestamp: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 document.body.append(renderer.domElement);
@@ -158,6 +190,7 @@ try {
   status.textContent = `Failed · ${exampleState.error}`;
   throw error;
 }
+const gpuTimestampSupported = renderer.hasFeature('timestamp-query');
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = false;
@@ -181,6 +214,14 @@ const sampleLimit = 180;
 const motionAxis = new Vector3(0, 1, 0);
 const motionOffset = new Vector3();
 let previousAnimationAt: number | null = null;
+let latestTimestampSample: {
+  readonly renderMs: number | null;
+  readonly computeMs: number | null;
+  readonly sampledAt: number;
+} | null = null;
+let lastTimestampResolveAt = 0;
+let timestampResolvePromise: Promise<void> | null = null;
+let analysisPromise: Promise<BottleneckAnalysis> | null = null;
 
 function rounded(value: number): number {
   return Math.round(value * 10) / 10;
@@ -196,6 +237,21 @@ function percentile(values: readonly number[], ratio: number): number {
   return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1)]!;
 }
 
+function updateDiagnosticsView(): void {
+  const nextDiagnostics = JSON.stringify({
+    performance: exampleState.performance,
+    analysisState: exampleState.analysisState,
+    analysisProgress: exampleState.analysisProgress,
+    analysis: exampleState.analysis,
+    load: currentResource?.diagnostics ?? null,
+    render: currentMesh?.diagnostics ?? null,
+  }, null, 2);
+  if (nextDiagnostics !== lastDiagnostics) {
+    diagnostics.textContent = nextDiagnostics;
+    lastDiagnostics = nextDiagnostics;
+  }
+}
+
 function resetFrameMetrics(): void {
   const timestamp = performance.now();
   previousFrameAt = null;
@@ -206,6 +262,7 @@ function resetFrameMetrics(): void {
   cpuSubmitDurations.length = 0;
   exampleState.performance = null;
   performanceSummary.textContent = 'Measuring frame rate…';
+  updateDiagnosticsView();
 }
 
 function setCameraMotion(active: boolean): void {
@@ -259,6 +316,16 @@ function updateFrameMetrics(timestamp: number, cpuSubmitDurationMs: number): voi
       : renderDiagnostics?.backend === 'webgl'
         ? 'worker-execution'
         : null,
+    gpuTimestampSupported,
+    latestGpuRenderMs: latestTimestampSample?.renderMs ?? null,
+    latestGpuComputeMs: latestTimestampSample?.computeMs ?? null,
+    gpuTimestampSampleAgeMs: latestTimestampSample
+      ? rounded(performance.now() - latestTimestampSample.sampledAt)
+      : null,
+    drawCalls: renderer.info.render.drawCalls,
+    triangles: renderer.info.render.triangles,
+    computePasses: renderer.info.compute.frameCalls,
+    rendererMemoryBytes: renderer.info.memory.total,
     viewport: {
       width: innerWidth,
       height: innerHeight,
@@ -269,16 +336,7 @@ function updateFrameMetrics(timestamp: number, cpuSubmitDurationMs: number): voi
   performanceSummary.textContent = `${snapshot.fps.toFixed(1)} FPS · ${snapshot.averageFrameMs.toFixed(1)} ms avg · ${snapshot.p95FrameMs.toFixed(1)} ms p95 · ${snapshot.sortsPerSecond.toFixed(1)} sorts/s`;
   metricsWindowStartedAt = timestamp;
   metricsSortCount = sortCount;
-
-  const nextDiagnostics = JSON.stringify({
-    performance: snapshot,
-    load: currentResource?.diagnostics ?? null,
-    render: renderDiagnostics ?? null,
-  }, null, 2);
-  if (nextDiagnostics !== lastDiagnostics) {
-    diagnostics.textContent = nextDiagnostics;
-    lastDiagnostics = nextDiagnostics;
-  }
+  updateDiagnosticsView();
   if (timestamp - metricsLogAt >= 5_000 && currentMesh) {
     console.info('[three-sog-splats][performance]', {
       source: exampleState.source,
@@ -286,6 +344,37 @@ function updateFrameMetrics(timestamp: number, cpuSubmitDurationMs: number): voi
     });
     metricsLogAt = timestamp;
   }
+}
+
+function scheduleTimestampSample(timestamp: number): void {
+  if (
+    !gpuTimestampSupported
+    || exampleState.analysisState === 'running'
+    || timestampResolvePromise
+    || timestamp - lastTimestampResolveAt < 2_000
+  ) return;
+  lastTimestampResolveAt = timestamp;
+  const includeCompute = renderer.info.compute.frameCalls > 0;
+  timestampResolvePromise = Promise.all([
+    renderer.resolveTimestampsAsync(TimestampQuery.RENDER),
+    includeCompute
+      ? renderer.resolveTimestampsAsync(TimestampQuery.COMPUTE)
+      : Promise.resolve(undefined),
+  ]).then(([renderMs, computeMs]) => {
+    latestTimestampSample = {
+      renderMs: typeof renderMs === 'number' && Number.isFinite(renderMs) && renderMs >= 0
+        ? rounded(renderMs)
+        : null,
+      computeMs: typeof computeMs === 'number' && Number.isFinite(computeMs) && computeMs >= 0
+        ? rounded(computeMs)
+        : null,
+      sampledAt: performance.now(),
+    };
+  }).catch((error) => {
+    console.warn('[three-sog-splats][timestamp-sample]', error);
+  }).finally(() => {
+    timestampResolvePromise = null;
+  });
 }
 
 function setLicense(source: SourceDefinition): void {
@@ -325,6 +414,361 @@ function fitCamera(mesh: SOGGaussianSplatMesh, source: SourceDefinition): void {
   controls.update();
 }
 
+interface AnalysisScenarioDefinition {
+  readonly id: string;
+  readonly label: string;
+  readonly instanceCount: number;
+  readonly pixelRatio: number;
+  readonly modelScale: number;
+  readonly visible: boolean;
+}
+
+interface AnalysisFrameProbe {
+  readonly cpuSubmitMs: number;
+  readonly gpuRenderMs: number | null;
+  readonly gpuComputeMs: number | null;
+  readonly gpuCompletionMs: number;
+  readonly drawCalls: number;
+  readonly triangles: number;
+  readonly computePasses: number;
+}
+
+function setAnalysisControlsDisabled(disabled: boolean): void {
+  sourceSelect.disabled = disabled;
+  backendSelect.disabled = disabled;
+  motionButton.disabled = disabled;
+  analysisButton.disabled = disabled || exampleState.state !== 'ready';
+}
+
+function setAnalysisProgress(completed: number, total: number, stage: string): void {
+  exampleState.analysisProgress = { completed, total, stage };
+  analysisSummary.textContent = `Profiling ${completed}/${total} · ${stage}`;
+  updateDiagnosticsView();
+}
+
+async function resolvePendingTimestamps(): Promise<void> {
+  if (!gpuTimestampSupported) return;
+  if (timestampResolvePromise) await timestampResolvePromise;
+  await Promise.all([
+    renderer.resolveTimestampsAsync(TimestampQuery.RENDER),
+    renderer.resolveTimestampsAsync(TimestampQuery.COMPUTE),
+  ]);
+}
+
+async function measureAnalysisFrame(): Promise<AnalysisFrameProbe> {
+  if (disposed) throw new Error('The example was disposed while analysis was running.');
+  renderer.info.reset();
+  const startedAt = performance.now();
+  renderer.render(scene, camera);
+  const cpuSubmitMs = performance.now() - startedAt;
+  const drawCalls = renderer.info.render.drawCalls;
+  const triangles = renderer.info.render.triangles;
+  const computePasses = renderer.info.compute.frameCalls;
+  const completionStartedAt = performance.now();
+  const [gpuRenderMs, gpuComputeMs] = gpuTimestampSupported
+    ? await Promise.all([
+        renderer.resolveTimestampsAsync(TimestampQuery.RENDER),
+        computePasses > 0
+          ? renderer.resolveTimestampsAsync(TimestampQuery.COMPUTE)
+          : Promise.resolve(undefined),
+      ])
+    : [undefined, undefined];
+  return {
+    cpuSubmitMs,
+    gpuRenderMs: typeof gpuRenderMs === 'number' && Number.isFinite(gpuRenderMs) && gpuRenderMs >= 0
+      ? gpuRenderMs
+      : null,
+    gpuComputeMs: typeof gpuComputeMs === 'number' && Number.isFinite(gpuComputeMs) && gpuComputeMs >= 0
+      ? gpuComputeMs
+      : null,
+    gpuCompletionMs: performance.now() - completionStartedAt,
+    drawCalls,
+    triangles,
+    computePasses,
+  };
+}
+
+function configureAnalysisScenario(
+  mesh: SOGGaussianSplatMesh,
+  definition: AnalysisScenarioDefinition,
+  originalScale: Vector3,
+): void {
+  renderer.setPixelRatio(definition.pixelRatio);
+  renderer.setSize(innerWidth, innerHeight);
+  mesh.geometry.instanceCount = definition.instanceCount;
+  mesh.scale.copy(originalScale).multiplyScalar(definition.modelScale);
+  mesh.visible = definition.visible;
+  mesh.updateMatrixWorld(true);
+}
+
+async function measureAnalysisScenario(
+  mesh: SOGGaussianSplatMesh,
+  definition: AnalysisScenarioDefinition,
+  originalScale: Vector3,
+  sampleCount: number,
+): Promise<BottleneckScenario> {
+  configureAnalysisScenario(mesh, definition, originalScale);
+  await measureAnalysisFrame();
+  const probes: AnalysisFrameProbe[] = [];
+  for (let sample = 0; sample < sampleCount; sample += 1) {
+    probes.push(await measureAnalysisFrame());
+  }
+  const gpuRenderSamples = probes.flatMap((probe) => (
+    probe.gpuRenderMs === null ? [] : [probe.gpuRenderMs]
+  ));
+  return {
+    id: definition.id,
+    label: definition.label,
+    instanceCount: definition.instanceCount,
+    pixelRatio: definition.pixelRatio,
+    modelScale: definition.modelScale,
+    sampleCount: probes.length,
+    gpuRenderMedianMs: gpuRenderSamples.length > 0
+      ? rounded(percentile(gpuRenderSamples, 0.5))
+      : null,
+    gpuRenderP95Ms: gpuRenderSamples.length > 0
+      ? rounded(percentile(gpuRenderSamples, 0.95))
+      : null,
+    cpuSubmitMedianMs: rounded(percentile(probes.map((probe) => probe.cpuSubmitMs), 0.5)),
+    cpuSubmitP95Ms: rounded(percentile(probes.map((probe) => probe.cpuSubmitMs), 0.95)),
+    gpuCompletionMedianMs: rounded(percentile(
+      probes.map((probe) => probe.gpuCompletionMs),
+      0.5,
+    )),
+    drawCalls: Math.max(...probes.map((probe) => probe.drawCalls)),
+    triangles: Math.max(...probes.map((probe) => probe.triangles)),
+    vertexInvocations: definition.visible
+      ? Math.max(...probes.map((probe) => probe.triangles)) * 3
+      : 0,
+  };
+}
+
+async function measureCameraSort(
+  mesh: SOGGaussianSplatMesh,
+  originalScale: Vector3,
+  originalPixelRatio: number,
+  sampleCount: number,
+): Promise<BottleneckSortMeasurement | null> {
+  configureAnalysisScenario(mesh, {
+    id: 'sort',
+    label: 'Camera-change radix sort',
+    instanceCount: 1,
+    pixelRatio: originalPixelRatio,
+    modelScale: 1,
+    visible: true,
+  }, originalScale);
+  const moveCamera = (): void => {
+    motionOffset.copy(camera.position).sub(controls.target);
+    motionOffset.applyAxisAngle(motionAxis, 0.0025);
+    camera.position.copy(controls.target).add(motionOffset);
+    camera.lookAt(controls.target);
+    camera.updateMatrixWorld(true);
+  };
+  moveCamera();
+  await measureAnalysisFrame();
+  const probes: AnalysisFrameProbe[] = [];
+  for (let sample = 0; sample < sampleCount; sample += 1) {
+    moveCamera();
+    probes.push(await measureAnalysisFrame());
+  }
+  const gpuComputeSamples = probes.flatMap((probe) => (
+    probe.gpuComputeMs === null ? [] : [probe.gpuComputeMs]
+  ));
+  if (probes.every((probe) => probe.computePasses === 0)) return null;
+  return {
+    sampleCount: probes.length,
+    gpuComputeMedianMs: gpuComputeSamples.length > 0
+      ? rounded(percentile(gpuComputeSamples, 0.5))
+      : null,
+    gpuComputeP95Ms: gpuComputeSamples.length > 0
+      ? rounded(percentile(gpuComputeSamples, 0.95))
+      : null,
+    cpuSubmitMedianMs: rounded(percentile(probes.map((probe) => probe.cpuSubmitMs), 0.5)),
+    computePasses: Math.round(percentile(probes.map((probe) => probe.computePasses), 0.5)),
+  };
+}
+
+function buildAnalysisScenarios(
+  splatCount: number,
+  pixelRatio: number,
+): AnalysisScenarioDefinition[] {
+  const scenarios: AnalysisScenarioDefinition[] = [{
+    id: 'empty',
+    label: 'Empty render pass',
+    instanceCount: 0,
+    pixelRatio,
+    modelScale: 1,
+    visible: false,
+  }];
+  for (const count of [100_000, 500_000, 1_000_000, 2_000_000]) {
+    if (count >= splatCount) continue;
+    scenarios.push({
+      id: `instances-${count}`,
+      label: `${count.toLocaleString()} splats`,
+      instanceCount: count,
+      pixelRatio,
+      modelScale: 1,
+      visible: true,
+    });
+  }
+  scenarios.push(
+    {
+      id: 'full',
+      label: `${splatCount.toLocaleString()} splats · full resolution`,
+      instanceCount: splatCount,
+      pixelRatio,
+      modelScale: 1,
+      visible: true,
+    },
+    {
+      id: 'half-resolution',
+      label: `${splatCount.toLocaleString()} splats · half DPR`,
+      instanceCount: splatCount,
+      pixelRatio: Math.max(0.5, pixelRatio * 0.5),
+      modelScale: 1,
+      visible: true,
+    },
+    {
+      id: 'quarter-resolution',
+      label: `${splatCount.toLocaleString()} splats · quarter DPR`,
+      instanceCount: splatCount,
+      pixelRatio: Math.max(0.25, pixelRatio * 0.25),
+      modelScale: 1,
+      visible: true,
+    },
+    {
+      id: 'quarter-scale',
+      label: `${splatCount.toLocaleString()} splats · quarter model scale`,
+      instanceCount: splatCount,
+      pixelRatio,
+      modelScale: 0.25,
+      visible: true,
+    },
+  );
+  return scenarios;
+}
+
+async function executeBottleneckAnalysis(): Promise<BottleneckAnalysis> {
+  const mesh = currentMesh;
+  if (!mesh || exampleState.state !== 'ready') {
+    throw new Error('Wait for a SOG scene to finish loading before running the analysis.');
+  }
+  const startedAtMs = performance.now();
+  const startedAt = new Date().toISOString();
+  const originalPixelRatio = renderer.getPixelRatio();
+  const originalScale = mesh.scale.clone();
+  const originalInstanceCount = mesh.geometry.instanceCount;
+  const originalVisible = mesh.visible;
+  const originalCameraPosition = camera.position.clone();
+  const originalCameraQuaternion = camera.quaternion.clone();
+  const originalCameraScale = camera.scale.clone();
+  const originalTarget = controls.target.clone();
+  const originalMotion = exampleState.motion;
+  const definitions = buildAnalysisScenarios(mesh.resource.count, originalPixelRatio);
+  const totalStages = definitions.length + 1;
+  exampleState.analysisState = 'running';
+  exampleState.analysisProgress = null;
+  exampleState.analysis = null;
+  exampleState.error = null;
+  exampleState.motion = 'idle';
+  motionButton.textContent = 'Start motion test';
+  setAnalysisControlsDisabled(true);
+  renderer.setAnimationLoop(null);
+
+  try {
+    await resolvePendingTimestamps();
+    const scenarios: BottleneckScenario[] = [];
+    for (let index = 0; index < definitions.length; index += 1) {
+      const definition = definitions[index]!;
+      setAnalysisProgress(index, totalStages, definition.label);
+      scenarios.push(await measureAnalysisScenario(mesh, definition, originalScale, 5));
+    }
+    setAnalysisProgress(definitions.length, totalStages, 'Camera-change radix sort');
+    const sort = await measureCameraSort(mesh, originalScale, originalPixelRatio, 3);
+    const derived = deriveBottleneckFindings(scenarios, sort);
+    const fullScenario = scenarios.find((scenario) => scenario.id === 'full');
+    const completedAt = new Date().toISOString();
+    const report: BottleneckAnalysis = {
+      source: exampleState.source,
+      backend: mesh.diagnostics.backend,
+      splatCount: mesh.resource.count,
+      timestampSupported: gpuTimestampSupported,
+      startedAt,
+      completedAt,
+      durationMs: rounded(performance.now() - startedAtMs),
+      viewport: {
+        width: innerWidth,
+        height: innerHeight,
+        pixelRatio: originalPixelRatio,
+      },
+      scenarios,
+      sort,
+      findings: derived.findings,
+      summary: derived.summary,
+      notes: [
+        'GPU timestamps measure render and compute passes; timestamp readback latency is excluded from CPU command-submission time.',
+        'Half DPR retains all instances and shader work while reducing drawing-buffer pixels to one quarter.',
+        'Quarter DPR retains all instances and shader work while reducing drawing-buffer pixels to one sixteenth.',
+        'Quarter model scale retains all instances and vertex work while reducing projected splat footprint.',
+        'The sort probe renders one instance but sorts the complete source, isolating camera-change compute from normal drawing.',
+        ...(fullScenario && mesh.material.transparent && mesh.material.side === DoubleSide
+          ? [`Transparent DoubleSide rendering produced ${fullScenario.drawCalls.toLocaleString()} draw calls and ${fullScenario.triangles.toLocaleString()} triangles in the full probe, approximately twice the splat geometry's single-sided triangle count.`]
+          : []),
+        'Invalid negative driver timestamp samples are discarded; the empty-pass GPU-completion latency is used as the fixed-cost proxy when needed.',
+      ],
+    };
+    exampleState.analysis = report;
+    exampleState.analysisState = 'complete';
+    exampleState.analysisProgress = null;
+    analysisSummary.textContent = report.summary;
+    console.info('[three-sog-splats][bottleneck-analysis]', report);
+    console.table(report.scenarios);
+    updateDiagnosticsView();
+    return report;
+  } catch (error) {
+    exampleState.analysisState = 'failed';
+    exampleState.analysisProgress = null;
+    exampleState.error = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    analysisSummary.textContent = `Analysis failed · ${exampleState.error}`;
+    updateDiagnosticsView();
+    throw error;
+  } finally {
+    if (!disposed && currentMesh === mesh && mesh.state === 'ready') {
+      renderer.setPixelRatio(originalPixelRatio);
+      renderer.setSize(innerWidth, innerHeight);
+      mesh.geometry.instanceCount = originalInstanceCount;
+      mesh.scale.copy(originalScale);
+      mesh.visible = originalVisible;
+      mesh.updateMatrixWorld(true);
+      camera.position.copy(originalCameraPosition);
+      camera.quaternion.copy(originalCameraQuaternion);
+      camera.scale.copy(originalCameraScale);
+      camera.updateMatrixWorld(true);
+      controls.target.copy(originalTarget);
+      controls.update();
+      exampleState.motion = originalMotion;
+      motionButton.textContent = originalMotion === 'orbit' ? 'Stop motion test' : 'Start motion test';
+      previousAnimationAt = null;
+      lastTimestampResolveAt = performance.now();
+      resetFrameMetrics();
+      renderer.setAnimationLoop(renderFrame);
+      setAnalysisControlsDisabled(false);
+    }
+  }
+}
+
+exampleState.runBottleneckAnalysis = (): Promise<BottleneckAnalysis> => {
+  if (analysisPromise) return analysisPromise;
+  analysisPromise = executeBottleneckAnalysis().finally(() => {
+    analysisPromise = null;
+  });
+  return analysisPromise;
+};
+
+analysisButton.addEventListener('click', () => {
+  void exampleState.runBottleneckAnalysis().catch(() => {});
+});
+
 function disposeSelection(): void {
   if (currentMesh) scene.remove(currentMesh);
   currentMesh?.dispose();
@@ -350,6 +794,11 @@ async function loadSource(key: SourceKey): Promise<void> {
   exampleState.state = 'loading';
   exampleState.source = key;
   exampleState.error = null;
+  exampleState.analysisState = 'idle';
+  exampleState.analysisProgress = null;
+  exampleState.analysis = null;
+  analysisSummary.textContent = 'Run the controlled profiler to identify the slow stage.';
+  analysisButton.disabled = true;
   status.textContent = `Loading ${source.name}…`;
   setLicense(source);
   history.replaceState(null, '', `?source=${key}${forceWebGL ? '&backend=webgl' : ''}`);
@@ -386,6 +835,7 @@ async function loadSource(key: SourceKey): Promise<void> {
     exampleState.backend = mesh.diagnostics.backend;
     exampleState.splatCount = resource.count;
     status.textContent = `${source.name} · ${resource.count.toLocaleString()} splats · ${mesh.diagnostics.backend}`;
+    analysisButton.disabled = false;
     resetFrameMetrics();
   } catch (error) {
     mesh?.dispose();
@@ -393,7 +843,9 @@ async function loadSource(key: SourceKey): Promise<void> {
     if (generation !== loadGeneration || controller.signal.aborted || disposed) return;
     exampleState.state = 'failed';
     exampleState.error = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    analysisButton.disabled = true;
     status.textContent = `Failed · ${exampleState.error}`;
+    updateDiagnosticsView();
   }
 }
 
@@ -407,7 +859,7 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-renderer.setAnimationLoop((timestamp) => {
+function renderFrame(timestamp: number): void {
   const cpuStartedAt = performance.now();
   const deltaSeconds = previousAnimationAt === null
     ? 0
@@ -423,7 +875,10 @@ renderer.setAnimationLoop((timestamp) => {
   renderer.render(scene, camera);
   exampleState.totalSortCount = currentMesh?.diagnostics.sortCount ?? 0;
   updateFrameMetrics(timestamp, performance.now() - cpuStartedAt);
-});
+  scheduleTimestampSample(timestamp);
+}
+
+renderer.setAnimationLoop(renderFrame);
 
 addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') resetFrameMetrics();
