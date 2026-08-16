@@ -15,6 +15,9 @@ type SourceKey = 'no-sh' | 'sh';
 
 interface FramePerformanceMetrics {
   readonly backend: string | null;
+  readonly radixBackend: string | null;
+  readonly radixBits: number;
+  readonly radixSelectionReason: string | null;
   readonly activeSplatCount: number;
   readonly fps: number;
   readonly averageFrameMs: number;
@@ -229,6 +232,9 @@ function updateFrameMetrics(timestamp: number, cpuSubmitDurationMs: number): voi
   const averageFrameMs = average(frameIntervals);
   const snapshot: FramePerformanceMetrics = {
     backend: renderDiagnostics?.backend ?? null,
+    radixBackend: renderDiagnostics?.radixBackend ?? null,
+    radixBits: renderDiagnostics?.radixBits ?? 0,
+    radixSelectionReason: renderDiagnostics?.radixSelectionReason ?? null,
     activeSplatCount: renderDiagnostics?.activeSplatCount ?? 0,
     fps: rounded(1_000 / averageFrameMs),
     averageFrameMs: rounded(averageFrameMs),

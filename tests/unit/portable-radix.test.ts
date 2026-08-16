@@ -22,6 +22,7 @@ describe('PortableRadixSortBackend', () => {
     [PORTABLE_KEYS_PER_WORKGROUP + 1, 32_912],
     [PORTABLE_KEYS_PER_WORKGROUP * 256, 8_405_056],
     [PORTABLE_KEYS_PER_WORKGROUP * 256 + 1, 8_405_140],
+    [2_000_000, 32_062_776],
   ])('accounts for owned storage at %s elements', (count, expected) => {
     expect(portableRadixAllocationBytes(count)).toBe(expected);
   });

@@ -23,6 +23,7 @@ describe('OneSweepRadixSortBackend', () => {
     [ONESWEEP_PARTITION_SIZE + 1, 16, 67_608],
     [195_099, 16, 3_228_088],
     [195_099, 24, 3_281_340],
+    [2_000_000, 24, 33_603_596],
   ])('accounts for owned storage at %s elements and %s bits', (count, bits, expected) => {
     expect(oneSweepRadixAllocationBytes(count, bits)).toBe(expected);
   });

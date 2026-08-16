@@ -2,12 +2,12 @@
 
 ## Guardrail
 
-The loader rejects resources above 2,000,000 splats. The WebGPU sorter uses
-exact-size bucket and order buffers plus two fixed 65,536-entry tables, totaling
-16,524,288 bytes at that limit. The public planning constant remains 52 GPU
-bytes per splat, or 104,000,000 bytes at the limit. This deliberately
-overestimates the current compact no-SH layout and leaves room for the SH label,
-sort storage, and alignment costs.
+The loader rejects resources above 2,000,000 splats. Including adaptive keys,
+the exact Portable radix storage is 40,062,776 bytes at that limit; the
+24-bit OneSweep layout is 41,603,596 bytes. These figures cover key/value
+ping-pong and exact scratch buffers, but not source textures or renderer-owned
+uniform storage. The public planning constant remains 52 GPU bytes per splat,
+or 104,000,000 bytes at the limit.
 
 The limit does not reserve memory. Decoded browser images, framebuffer targets,
 Three.js renderer state, driver allocations, and other scene content add to the
@@ -34,34 +34,45 @@ sustained 60 FPS on the full fixture; its Worker sort took about 6.9 ms. These
 numbers are the before-optimization reference for the acceptance measurements
 below, not general hardware guarantees.
 
-### Parallel-sort acceptance result
+### Dual-radix acceptance result
 
-The optimized path maps ordered IEEE-754 camera depth to 65,536 buckets. GPU
-workgroups reset the tables, decode centers and atomically build the histogram,
-and scatter the complete order. Only the exclusive prefix over the fixed table
-is serial. Source textures, buckets, and order remain GPU-resident during normal
-rendering; the implementation does not reduce the active set.
+The WebGPU path generates weighted adaptive camera-depth keys and applies a
+stable radix sort. Portable uses 4-bit digits, 2,048 keys per workgroup,
+hierarchical Blelloch scans, and stable ranked scatter. OneSweep uses 8-bit
+digits, an all-pass histogram, subgroup ranking, chained lookback, and
+coalesced scatter, but is never dispatched unless the conservative NVIDIA
+subgroup policy admits the active renderer.
 
-The same full fixture was measured after the change in the same Codex in-app
-browser environment:
+The following 180-frame windows were recorded on 2026-08-16 in Headless Chrome
+151 at 960x640, DPR 1. `sort timing` is CPU command-submission time for WebGPU
+and Worker execution time for forced WebGL, not GPU elapsed time.
 
-| Backend / state | FPS | Frame p95 | Sort rate | Latest sort timing |
+| Backend / full model / state | FPS | Frame p95 | Sort rate | Sort timing |
 | --- | ---: | ---: | ---: | ---: |
-| WebGPU idle | 60.0 | 18.6 ms | 0 sorts/s | 0.0 ms CPU submission |
-| WebGPU sustained orbit, 5.3 s | 60.0 | 18.5 ms | 60 sorts/s | 0.2 ms CPU submission |
-| WebGPU recovered, 3.2 s | 60.0 | 18.5 ms | 0 sorts/s | 0.1 ms CPU submission |
-| forced WebGL idle | 60.0 | 18.7 ms | 0 sorts/s | 6.5 ms Worker execution |
-| forced WebGL sustained orbit, 5.3 s | 60.0 | 17.9 ms | 60 sorts/s | 6.7 ms Worker execution |
-| forced WebGL recovered, 3.2 s | 60.0 | 17.9 ms | 0 sorts/s | 6.7 ms Worker execution |
+| WebGPU Portable / Millipede / idle | 69.3 | 26.1 ms | 0/s | 0.2 ms |
+| WebGPU Portable / Millipede / orbit | 69.0 | 26.1 ms | 68.4/s | 0.1 ms |
+| WebGPU Portable / Millipede / recovered | 69.6 | 26.1 ms | 0/s | 0.1 ms |
+| WebGPU Portable / Lion SH2 / idle | 69.7 | 26.1 ms | 0/s | 0.1 ms |
+| WebGPU Portable / Lion SH2 / orbit | 70.0 | 26.1 ms | 70.0/s | 0.0 ms |
+| WebGPU Portable / Lion SH2 / recovered | 69.2 | 26.1 ms | 0/s | 0.0 ms |
+| forced WebGL / Millipede / idle | 69.8 | 26.1 ms | 0/s | 7.2 ms |
+| forced WebGL / Millipede / orbit | 68.1 | 26.1 ms | 63.0/s | 5.5 ms |
+| forced WebGL / Millipede / recovered | 70.9 | 26.1 ms | 0/s | 5.6 ms |
+| forced WebGL / Lion SH2 / idle | 67.0 | 27.0 ms | 0/s | 10.2 ms |
+| forced WebGL / Lion SH2 / orbit | 67.6 | 27.1 ms | 59.5/s | 8.6 ms |
+| forced WebGL / Lion SH2 / recovered | 68.3 | 27.1 ms | 0/s | 8.4 ms |
 
-All WebGPU samples retained 116,374 active splats and zero readbacks. Forced
-WebGL retained its single preparation-time center readback. The complete r184
-and r185 nine-test browser matrices and full-fixture snapshots passed, including
-the public example's complete Millipede no-SH and 195,099-Gaussian Lion SH2
-sources on both backends.
-Relative order inside one 16-bit depth bucket is unspecified; complete
-permutation, monotonic bucket order, and snapshot tolerances are the acceptance
-criteria for that approximation.
+Portable reported 16 rounded radix bits for both full models. It retained
+116,374 and 195,099 active splats, zero readbacks, and zero CPU sort allocation;
+estimated total GPU allocations were 4,674,440 and 10,698,036 bytes. Forced
+WebGL retained one preparation-time center readback and reported no radix
+backend. The local adapter selected Portable with `unsupported-vendor`, so
+OneSweep execution remains a compatible-NVIDIA hardware-conditioned result;
+r184-r185 compilation and safety-policy coverage passed locally.
+
+Sorting is suppressed on an unchanged view. Consequently this change does not
+improve stationary Lion SH2 shading cost: idle frames perform no radix work,
+and projection/SH caching remains outside this scope.
 
 The baseline was recorded on 2026-08-15 using macOS arm64, Node v24.14.0, and
 Headless Chrome 151 with Three.js 0.185.0. The bundled CC0 fixtures contain four
@@ -88,8 +99,8 @@ order use 4 MB. The 52-byte native planning estimate is 13 MB, while a simple
 fully expanded SH3 layout (position, quaternion, scale, RGBA, and 45 SH floats)
 is 59 MB, 4.54 times the planning estimate. At the 2,000,000-splat guardrail,
 the planning estimate is 104 MB before the additional allocations listed above.
-At that limit, the exact-size WebGPU counting-sort buffers retain 16,524,288
-bytes of typed-array backing in addition to their GPU allocation.
+At that limit, the dual-radix allocation figures at the start of this document
+apply in addition to source textures and renderer allocations.
 
 ## Methodology
 

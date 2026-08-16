@@ -58,9 +58,11 @@ resource.dispose();
 给 `WebGPURenderer` 传入 `{ forceWebGL: true }` 可使用回退路径。该路径每个
 原生资源只异步回读一次 `center.xyz`，在可转移 Worker 中排序，仅上传实例
 顺序；旋转、缩放、颜色、不透明度和 SH 始终留在 GPU。WebGPU 路径使用并行
-16 位深度桶 counting sort 在 GPU storage buffer 内生成并消费完整顺序，不回读
-center、bucket 或 order。同一深度桶内的相对顺序不作保证，由单调桶顺序测试和
-截图回归共同保护视觉结果。
+稳定的自适应 GPU radix sort 生成并消费完整顺序，不回读 center、key、中间
+buffer 或 order。通用路径采用 4 位 Portable backend；只有适配器可关联确认、
+厂商为 NVIDIA、subgroup 可用且报告的 subgroup size 兼容时，才自动选择 8 位
+OneSweep。自定义、未知、Apple、移动端或身份有歧义的设备均回退 Portable；相同
+key 的 splat 保持源顺序。
 
 同一个 `SOGLoader` 发起的等价并发请求会合并。每个调用者得到独立资源租约；
 取消一个调用者不会影响其他消费者，只有最后一个消费者退出才中止共享操作。
@@ -82,7 +84,8 @@ center、bucket 或 order。同一深度桶内的相对顺序不作保证，由�
 
 加载诊断包含各阶段耗时、下载字节、ZIP 条目数、解码图片数、splat 数、临时
 保留内存和失败阶段。渲染诊断包含 backend、upload/compile/prepare/首帧/sort
-耗时、sort/upload/readback 计数、active count、GPU 分配估算和状态。
+耗时、sort/upload/readback 计数、active count、GPU 分配估算、状态、所选 radix
+backend、舍入后的 radix bits 和选择原因。
 
 ## MVP 限制与非目标
 

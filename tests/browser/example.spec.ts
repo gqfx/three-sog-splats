@@ -240,6 +240,11 @@ for (const backend of ['webgpu', 'webgl'] as const) {
     expect(performance?.fps).toBeGreaterThan(0);
     expect(performance?.averageFrameMs).toBeGreaterThan(0);
     expect(performance?.backend).toBe(backend);
+    if (backend === 'webgpu') expect(performance?.radixBackend).toMatch(/^(portable|onesweep)$/);
+    else expect(performance?.radixBackend).toBeNull();
+    expect(performance?.radixBits).toBe(backend === 'webgpu' ? 16 : 0);
+    if (backend === 'webgpu') expect(performance?.radixSelectionReason).toEqual(expect.any(String));
+    else expect(performance?.radixSelectionReason).toBeNull();
     expect(performance?.activeSplatCount).toBe(116_374);
     expect(performance?.totalSortCount).toBeGreaterThan(0);
     expect(performance?.sortDurationKind).toBe(

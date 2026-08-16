@@ -65,9 +65,12 @@ Pass `{ forceWebGL: true }` to `WebGPURenderer` to exercise the fallback. It
 decodes and asynchronously reads back `center.xyz` once per native resource,
 sorts in a transferable worker, and uploads only the instanced order. All other
 attributes remain GPU-native. The WebGPU path builds a complete order with a
-parallel 16-bit depth-bucket counting sort in GPU storage buffers, with no
-center, bucket, or order readback. Relative order inside one depth bucket is
-unspecified and protected by monotonic-order and visual regression tests.
+stable adaptive GPU radix sort, with no center, key, intermediate-buffer, or
+order readback. A portable 4-bit backend is the universal path. An 8-bit
+OneSweep backend is selected only for a correlated NVIDIA adapter with
+advertised subgroup support and a compatible reported subgroup size; custom,
+unknown, Apple, mobile, or otherwise ambiguous devices stay on Portable.
+Equal-key splats retain source order.
 
 Equivalent in-flight loads from one `SOGLoader` are deduplicated. Each caller
 receives an independent resource lease; cancelling one caller does not abort
@@ -96,7 +99,7 @@ Load diagnostics include per-stage timings, downloaded bytes, archive entries,
 decoded images, splat count, retained temporary bytes, and failed-stage identity.
 Render diagnostics include backend, upload/compile/prepare/first-frame/sort
 timings, sort/upload/readback counters, active count, estimated GPU allocation,
-and state.
+state, selected radix backend, rounded radix bits, and selection reason.
 
 ## MVP limits and non-goals
 
