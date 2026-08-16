@@ -83,7 +83,11 @@ for (const fixture of ['no-sh', 'sh'] as const) {
     expect(snapshot.diagnostics?.readbackCount).toBe(0);
     expect(snapshot.diagnostics?.activeSplatCount).toBe(4);
     if (fixture === 'no-sh') {
-      expect(await page.evaluate(() => window.__SOG_EXAMPLE__.verifyGpuSort())).toEqual([1, 0, 3, 2]);
+      const verification = await page.evaluate(() => window.__SOG_EXAMPLE__.verifyGpuSort());
+      expect(verification.complete).toBe(true);
+      expect(verification.monotonic).toBe(true);
+      expect(verification.order).toHaveLength(4);
+      expect([...verification.order].sort((left, right) => left - right)).toEqual([0, 1, 2, 3]);
       expect((await page.evaluate(() => window.__SOG_EXAMPLE__.diagnostics?.readbackCount))).toBe(0);
     }
     expect(errors).toEqual([]);

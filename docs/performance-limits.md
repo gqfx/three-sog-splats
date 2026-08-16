@@ -15,6 +15,24 @@ benchmark their actual asset, camera motion, SH band, output size, and backend.
 
 ## Recorded baseline
 
+### Full-resolution WebGPU interaction baseline
+
+Before replacing the serial WebGPU radix passes, the full 116,374-splat
+Millipede fixture was measured in the Codex in-app browser at a 1280x720 CSS
+viewport and DPR 2 on 2026-08-16. No splats were removed or decimated.
+
+| State | FPS | Frame p95 | Sort rate | Observation |
+| --- | ---: | ---: | ---: | --- |
+| Clean untouched idle, 14 s | 60.0 | 17.4 ms | 0 sorts/s | Two preparation sorts, then stable |
+| Sustained orbit, 8 s | 19.1 | about 150 ms | 6.8 sorts/s | Serial GPU radix passes dominate |
+| Pointer released, 12 s | 13.8 | about 150 ms | 6.9 sorts/s | Frame-dependent damping keeps scheduling sorts |
+
+The control run with only four splats sustained 60 FPS while moving, which
+isolates the regression to the scale-dependent sort path. Forced WebGL also
+sustained 60 FPS on the full fixture; its Worker sort took about 6.9 ms. These
+numbers are the before-optimization reference for the acceptance measurements
+below, not general hardware guarantees.
+
 The baseline was recorded on 2026-08-15 using macOS arm64, Node v24.14.0, and
 Headless Chrome 151 with Three.js 0.185.0. The bundled CC0 fixtures contain four
 synthetic splats, so their measurements represent fixed pipeline and loading

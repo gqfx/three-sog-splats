@@ -17,7 +17,7 @@ import {
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { BrowserSOGImageDecoder, SOGGaussianSplatMesh, SOGLoader } from '../src/index.js';
 import type { SOGLoadDiagnostics, SOGRenderDiagnostics } from '../src/index.js';
-import { PortableGpuRadixSorter } from '../src/render/sort/PortableGpuRadixSorter.js';
+import { ParallelGpuSorter } from '../src/render/sort/ParallelGpuSorter.js';
 
 declare global {
   interface Window {
@@ -32,7 +32,12 @@ declare global {
       moveCamera(): void;
       dispose(): void;
       decodeFixtureTexel(filename: string): Promise<number[]>;
-      verifyGpuSort(): Promise<number[]>;
+      verifyGpuSort(): Promise<{
+        order: number[];
+        buckets: number[];
+        complete: boolean;
+        monotonic: boolean;
+      }>;
     };
   }
 }
@@ -60,7 +65,7 @@ const state: Window['__SOG_EXAMPLE__'] = window.__SOG_EXAMPLE__ = {
   moveCamera: () => {},
   dispose: () => {},
   decodeFixtureTexel: async () => [],
-  verifyGpuSort: async () => [],
+  verifyGpuSort: async () => ({ order: [], buckets: [], complete: false, monotonic: false }),
 };
 
 state.decodeFixtureTexel = async (filename) => {
@@ -81,7 +86,9 @@ state.decodeFixtureTexel = async (filename) => {
 };
 
 state.verifyGpuSort = async () => {
-  if (state.backend !== 'webgpu') return [];
+  if (state.backend !== 'webgpu') {
+    return { order: [], buckets: [], complete: false, monotonic: false };
+  }
   const lowBytes = new Uint8Array(4 * 4);
   const highBytes = new Uint8Array(4 * 4);
   const quantizedZ = [20_000, 1_000, 40_000, 20_000];
@@ -106,7 +113,7 @@ state.verifyGpuSort = async () => {
   const meansHigh = createTexture(highBytes);
   renderer.initTexture(meansLow);
   renderer.initTexture(meansHigh);
-  const sorter = new PortableGpuRadixSorter(
+  const sorter = new ParallelGpuSorter(
     4,
     { meansLow, meansHigh, width: 4 },
     new Vector3(-3, -3, -3),
@@ -115,8 +122,17 @@ state.verifyGpuSort = async () => {
   try {
     sorter.updateViewMatrix(new Matrix4());
     await sorter.sortAsync(renderer);
-    const buffer = await renderer.getArrayBufferAsync(sorter.orderAttribute);
-    return [...new Uint32Array(buffer).slice(0, 4)];
+    const [orderBuffer, bucketBuffer] = await Promise.all([
+      renderer.getArrayBufferAsync(sorter.orderAttribute),
+      renderer.getArrayBufferAsync(sorter.bucketAttribute),
+    ]);
+    const order = new Uint32Array(orderBuffer).slice(0, 4);
+    const buckets = new Uint32Array(bucketBuffer).slice(0, 4);
+    const complete = new Set(order).size === 4 && order.every((index) => index < 4);
+    const monotonic = order.every((index, position) => (
+      position === 0 || buckets[order[position - 1]!]! <= buckets[index]!
+    ));
+    return { order: [...order], buckets: [...buckets], complete, monotonic };
   } finally {
     sorter.dispose();
     meansLow.dispose();

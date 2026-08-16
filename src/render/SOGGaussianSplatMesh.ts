@@ -32,7 +32,7 @@ import {
 } from './material.js';
 import type { SOGMaterialTextures } from './material.js';
 import { SOGRenderStore } from './SOGRenderStore.js';
-import { PortableGpuRadixSorter } from './sort/PortableGpuRadixSorter.js';
+import { ParallelGpuSorter } from './sort/ParallelGpuSorter.js';
 import { WebGLSortBackend } from './sort/WebGLSortBackend.js';
 
 const now = (): number => globalThis.performance?.now() ?? Date.now();
@@ -249,10 +249,10 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
         ...(textureMap.get('shN_labels') ? { shLabels: textureMap.get('shN_labels')! } : {}),
       };
 
-      let gpuSorter: PortableGpuRadixSorter | undefined;
+      let gpuSorter: ParallelGpuSorter | undefined;
       let webglSorter: WebGLSortBackend | undefined;
       if (backend === 'webgpu') {
-        gpuSorter = new PortableGpuRadixSorter(
+        gpuSorter = new ParallelGpuSorter(
           this.#source.count,
           { meansLow, meansHigh, width: meansImage.width },
           new Vector3(...this.#source.meta.means.mins),
