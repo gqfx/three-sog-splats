@@ -1,10 +1,12 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, resolve } from 'node:path';
+import { chromium } from '@playwright/test';
+import { createServer } from 'node:net';
 
 const root = resolve(import.meta.dirname, '..');
-const threeVersion = process.env.THREE_COMPAT_VERSION ?? '0.184.0';
+const threeVersion = process.argv[2] ?? process.env.THREE_COMPAT_VERSION ?? '0.184.0';
 const temporary = await mkdtemp(resolve(tmpdir(), 'three-sog-consumer-'));
 const packDirectory = resolve(temporary, 'pack');
 const consumer = resolve(temporary, 'consumer');
@@ -18,7 +20,8 @@ const run = (command, args, cwd = root) => execFileSync(command, args, {
 });
 
 try {
-  run('npm', ['run', 'build']);
+  // A clean dist proves npm pack invokes its own build gate.
+  run('npm', ['run', 'clean']);
   const packResult = JSON.parse(run('npm', ['pack', '--json', '--pack-destination', packDirectory]));
   const tarballName = packResult[0]?.filename;
   if (!tarballName) throw new Error('npm pack did not report a tarball.');
@@ -26,6 +29,7 @@ try {
   for (const required of [
     'dist/index.js',
     'dist/index.d.ts',
+    'src/index.ts',
     'dist/workers/archive.worker.js',
     'dist/workers/image.worker.js',
     'dist/workers/sort.worker.js',
@@ -61,26 +65,10 @@ try {
     include: ['src'],
   }, null, 2));
   await writeFile(resolve(consumer, 'index.html'), '<div id="app"></div><script type="module" src="/src/main.ts"></script>');
-  await writeFile(resolve(consumer, 'src/main.ts'), `
-import { SOGGaussianSplatMesh, SOGLoader, SOGError } from 'three-sog-splats';
-import type { SOGErrorCode, SOGLoadOptions, SOGRenderDiagnostics } from 'three-sog-splats';
-import { WebGPURenderer } from 'three/webgpu';
-
-const renderer = new WebGPURenderer({ forceWebGL: true });
-const loader: SOGLoader = new SOGLoader();
-const options: SOGLoadOptions = {};
-const exportedTypes: SOGRenderDiagnostics | undefined = undefined;
-const errorCode: SOGErrorCode = 'ABORTED';
-document.querySelector('#app')!.textContent = [
-  SOGGaussianSplatMesh.name,
-  SOGError.name,
-  renderer.isWebGPURenderer,
-  loader instanceof SOGLoader,
-  options,
-  exportedTypes,
-  errorCode,
-].join(':');
-`);
+  await writeFile(resolve(consumer, 'src/main.ts'), await readFile(resolve(root, 'scripts/consumer-entry.txt'), 'utf8'));
+  await mkdir(resolve(consumer, 'public'));
+  await cp(resolve(root, 'tests/fixtures/generated/minimal-sh1.sog'), resolve(consumer, 'public/fixture.sog'));
+  await writeFile(resolve(consumer, 'vite.config.js'), 'export default { build: { target: "es2022" } };');
 
   run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund'], consumer);
   run('npm', ['exec', 'tsc', '--', '--noEmit'], consumer);
@@ -107,26 +95,59 @@ document.querySelector('#app')!.textContent = [
     throw new Error('Three.js entry points were not preserved as external ESM imports.');
   }
 
+  const port = await new Promise((resolvePort, reject) => {
+    const socket = createServer(); socket.once('error', reject);
+    socket.listen(0, '127.0.0.1', () => {
+      const { port } = socket.address(); socket.close(() => resolvePort(port));
+    });
+  });
+  const baseUrl = `http://127.0.0.1:${port}`;
   const server = spawn(resolve(consumer, 'node_modules/.bin/vite'), [
-    '--host', '127.0.0.1', '--port', '4174', '--strictPort',
+    'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort',
   ], { cwd: consumer, stdio: ['ignore', 'pipe', 'pipe'] });
+  let browser;
   try {
     const deadline = Date.now() + 10_000;
     let response;
     while (Date.now() < deadline) {
-      try {
-        response = await fetch('http://127.0.0.1:4174/');
-        if (response.ok) break;
-      } catch {
-        await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
-      }
+      try { response = await fetch(baseUrl); if (response.ok) break; } catch { /* starting */ }
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
     }
-    if (!response?.ok) throw new Error('The external consumer example server did not start.');
+    if (!response?.ok) throw new Error('The production consumer preview did not start.');
+    const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+      ?? (process.platform === 'darwin' ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : undefined);
+    browser = await chromium.launch({ ...(executablePath ? { executablePath } : {}), headless: true,
+      args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan,UseSkiaRenderer'] });
+    for (const backend of ['webgl', 'webgpu']) {
+      const page = await browser.newPage();
+      const errors = []; const workers = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      page.on('worker', (worker) => workers.push(worker.url()));
+      page.on('console', (message) => {
+        if (/GPUValidationError|validation error|GL_INVALID_OPERATION/.test(message.text())) errors.push(message.text());
+      });
+      await page.goto(`${baseUrl}/?backend=${backend}`);
+      if (backend === 'webgpu') {
+        const available = await page.evaluate(async () => !!(await navigator.gpu?.requestAdapter()));
+        if (!available) {
+          if (process.env.SOG_REQUIRE_WEBGPU === '1') throw new Error('Required WebGPU unavailable in package consumer.');
+          console.log('Package consumer WebGPU skipped: adapter unavailable.'); await page.close(); continue;
+        }
+      }
+      await page.waitForFunction(() => window.__CONSUMER__?.state === 'ready' && window.__CONSUMER__.sorts >= 2);
+      const state = await page.evaluate(() => window.__CONSUMER__);
+      if (state.backend !== backend || errors.length) throw new Error(JSON.stringify({ state, errors }));
+      if (!workers.some((url) => url.includes('archive.worker')) || !workers.some((url) => url.includes('image.worker'))
+        || (backend === 'webgl' && !workers.some((url) => url.includes('sort.worker')))) {
+        throw new Error(`Published workers were not exercised: ${workers.join(', ')}`);
+      }
+      await page.evaluate(() => window.disposeConsumer()); await page.close();
+    }
   } finally {
-    server.kill('SIGTERM');
+    await browser?.close(); server.kill('SIGTERM');
   }
+  console.log(`External package consumer on Three.js ${threeVersion}: clean pack, types, production build, real workers and render verified.`);
 
-  console.log(`External package consumer on Three.js ${threeVersion}: types, peer resolution, Vite build, exports, and startup verified.`);
 } finally {
   await rm(temporary, { recursive: true, force: true });
 }

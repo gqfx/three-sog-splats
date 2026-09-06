@@ -46,7 +46,7 @@ describe('SOGGaussianSplatMesh lifecycle', () => {
     expect(mesh.diagnostics.radixSelectionReason).toBe('subgroups-unavailable');
     expect(mesh.diagnostics.readbackCount).toBe(0);
     expect(mesh.diagnostics.activeSplatCount).toBe(4);
-    expect(mesh.diagnostics.allocatedCpuBytes).toBe(0);
+    expect(mesh.diagnostics.allocatedCpuBytes).toBeGreaterThan(0);
     expect(renderer.init).toHaveBeenCalledTimes(1);
     expect(renderer.initTexture).toHaveBeenCalledTimes(6);
     const camera = new PerspectiveCamera();
@@ -185,4 +185,28 @@ describe('SOGGaussianSplatMesh lifecycle', () => {
     expect(materialDisposed).toHaveBeenCalledTimes(1);
     source.dispose();
   });
+});
+
+it('rejects device image limits and GPU budgets before texture allocation', async () => {
+  const source = await resource();
+  const renderer = fakeRenderer();
+  const mesh = new SOGGaussianSplatMesh(source);
+  (renderer.backend as any).device = { limits: { maxTextureDimension2D: 1 } };
+  await expect(mesh.prepare(renderer)).rejects.toThrow(/texture limit/);
+  expect(renderer.initTexture).not.toHaveBeenCalled();
+  delete (renderer.backend as any).device;
+  await expect(mesh.prepare(renderer, { maxGpuBytes: 1 })).rejects.toThrow(/maxGpuBytes/);
+  expect(renderer.initTexture).not.toHaveBeenCalled();
+  mesh.dispose(); source.dispose();
+});
+
+it('allows disabling the projected cache and guards translated instance budgets', async () => {
+  const source = await resource();
+  const mesh = new SOGGaussianSplatMesh(source);
+  await mesh.prepare(fakeRenderer(), { maxProjectedCacheBytes: 0 });
+  expect(mesh.diagnostics.projectedCacheEnabled).toBe(false);
+  mesh.dispose();
+  const translated = new SOGGaussianSplatMesh(source).setInstanceTransforms([new Matrix4().makeTranslation(2, 0, 0)]);
+  await expect(translated.prepare(fakeRenderer(), { maxProjectedCacheBytes: 0 })).rejects.toThrow(/budgets/);
+  translated.dispose(); source.dispose();
 });

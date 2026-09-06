@@ -21,7 +21,6 @@ import {
   storage,
   uint,
   uniform,
-  unpackHalf2x16,
   workgroupArray,
   workgroupBarrier,
   workgroupId,
@@ -78,17 +77,14 @@ function classifyProjectedSplat(
   enabled: any,
 ): any {
   const centers = storage(projected.centers, 'vec4', projected.logicalCount).toReadOnly();
-  const ellipses = storage(projected.ellipses, 'uvec2', projected.logicalCount).toReadOnly();
+  const ellipses = storage(projected.ellipses, 'vec4', projected.logicalCount).toReadOnly();
   const colors = storage(projected.colors, 'uint', projected.logicalCount).toReadOnly();
-  const order = storage(orderAttribute, 'uint', projected.sourceCount).toReadOnly();
-  const copyIndex = logicalIndex.div(uint(projected.sourceCount));
-  const sourceOrderIndex = logicalIndex.mod(uint(projected.sourceCount));
-  const sourceIndex = order.element(sourceOrderIndex);
-  const projectedIndex = copyIndex.mul(uint(projected.sourceCount)).add(sourceIndex);
+  const order = storage(orderAttribute, 'uint', projected.logicalCount).toReadOnly();
+  const projectedIndex = order.element(logicalIndex);
   const centerClip = centers.element(projectedIndex).toVar();
   const packedEllipse = ellipses.element(projectedIndex);
-  const ellipseX = unpackHalf2x16(packedEllipse.x) as any;
-  const ellipseY = unpackHalf2x16(packedEllipse.y) as any;
+  const ellipseX = packedEllipse.xy;
+  const ellipseY = packedEllipse.zw;
   const packedColor = colors.element(projectedIndex);
   const opacity = float(packedColor.shiftRight(uint(24)).bitAnd(uint(0xff))).div(255);
   const reason = uint(0).toVar();

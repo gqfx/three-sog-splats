@@ -13,6 +13,7 @@ import {
   Texture,
   Vector2,
   Vector3,
+  Vector4,
 } from 'three/webgpu';
 import type { Camera, WebGPURenderer } from 'three/webgpu';
 import { CleanupStack } from '../core/cleanup.js';
@@ -39,9 +40,10 @@ import { SOGWebGPUCache } from './SOGWebGPUCache.js';
 import { DEFAULT_CONTRIBUTION_CULL_THRESHOLD } from './contribution.js';
 import { GpuRadixSorter } from './sort/GpuRadixSorter.js';
 import { WebGLSortBackend } from './sort/WebGLSortBackend.js';
+import { prepareBudget, projectedCacheBytes, validateDeviceImages, validateDeviceBuffers } from './budget.js';
 
 const now = (): number => globalThis.performance?.now() ?? Date.now();
-const PROJECTED_CACHE_MAX_UNIQUE_SPLATS = 1_000_000;
+
 
 interface ThreeRendererBackendFlags {
   readonly isWebGPUBackend?: boolean;
@@ -64,7 +66,7 @@ function isTranslationMatrix(matrix: Matrix4): boolean {
     matrix.elements[14]!,
   );
   return matrix.elements.every((value, index) => (
-    Math.abs(value - expected.elements[index]!) <= 1e-8
+    Number.isFinite(Math.fround(value)) && Math.abs(value - expected.elements[index]!) <= 1e-8
   ));
 }
 
@@ -216,7 +218,7 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
 
   /**
    * Batches translated copies into one WebGPU draw while retaining one source
-   * payload and one shared source-order sort. Call before prepare().
+   * payload and globally sorting the expanded logical stream. Call before prepare().
    */
   setInstanceTransforms(transforms: readonly Matrix4[]): this {
     if (this.#state !== 'unprepared' || this.#preparePromise) {
@@ -230,7 +232,7 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
     }
     if (transforms.some((matrix) => !isTranslationMatrix(matrix))) {
       throw new RangeError(
-        'Batched SOG instance transforms currently support translations only so all copies can share one depth order.',
+        'Batched SOG instance transforms currently support translations only.',
       );
     }
     const logicalCount = this.#source.count * transforms.length;
@@ -245,6 +247,7 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
 
   async prepare(renderer: WebGPURenderer, options: SOGPrepareOptions = {}): Promise<void> {
     assertThreeWebGPURenderer(renderer);
+    prepareBudget(options);
     if (this.#state === 'disposed') throw new SOGError('PREPARATION_FAILED', 'Cannot prepare a disposed SOG mesh.');
     if (this.#renderer && this.#renderer !== renderer) {
       throw new SOGError('RENDERER_MISMATCH', 'A prepared SOG mesh cannot be rebound to another renderer; create another mesh over the same resource.');
@@ -255,7 +258,7 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
     const controller = new AbortController();
     this.#prepareController = controller;
     const signal = combinedSignal(controller.signal, options.signal);
-    this.#preparePromise = this.#prepare(renderer, signal).finally(() => {
+    this.#preparePromise = this.#prepare(renderer, signal, options).finally(() => {
       this.#preparePromise = null;
       this.#prepareController = null;
     });
@@ -280,7 +283,7 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
     this.onAfterRender = () => {};
   }
 
-  async #prepare(renderer: WebGPURenderer, signal: AbortSignal): Promise<void> {
+  async #prepare(renderer: WebGPURenderer, signal: AbortSignal, options: SOGPrepareOptions): Promise<void> {
     const startedAt = now();
     this.#state = 'preparing';
     this.#diagnostics.state = 'preparing';
@@ -297,7 +300,32 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
       else if (backendFlags.isWebGLBackend === true) backend = 'webgl';
       else throw new SOGError('UNSUPPORTED_RENDERER', 'The initialized Three.js renderer backend is not supported.');
       this.#diagnostics.backend = backend;
+      validateDeviceImages(renderer, this.#source.nativeImages.values());
+      const budget = prepareBudget(options);
+      const logicalCount = this.#source.count * this.#instanceTransforms.length;
+      const nativeBytes = [...this.#source.nativeImages.values()].reduce((sum, image) => sum + image.width * image.height * 4, 4096);
+      // Conservative sort allowance includes both radix layouts and translations.
+      const baseGpuBytes = nativeBytes + (backend === 'webgpu'
+        ? logicalCount * 24 + 1024 * 1024 + this.#instanceTransforms.length * 16
+        : logicalCount * 4);
+      const cacheBytes = projectedCacheBytes(this.#source.meta, this.#instanceTransforms.length);
+      const shouldCacheProjectedData = backend === 'webgpu'
+        && cacheBytes <= budget.maxProjectedCacheBytes
+        && baseGpuBytes + cacheBytes <= budget.maxGpuBytes;
+      const hasInstanceTransform = this.#instanceTransforms.length > 1
+        || !this.#instanceTransforms[0]!.equals(new Matrix4());
+      if (baseGpuBytes > budget.maxGpuBytes) {
+        throw new SOGError('PREPARATION_FAILED', 'SOG source and sort resources exceed maxGpuBytes.');
+      }
+      if (hasInstanceTransform && !shouldCacheProjectedData) {
+        throw new SOGError('PREPARATION_FAILED', 'Translated SOG instances require WebGPU and sufficient projected-cache/GPU budgets.');
+      }
 
+      if (backend === 'webgpu') {
+        validateDeviceBuffers(renderer, Math.max(logicalCount * (shouldCacheProjectedData ? 16 : 4),
+          this.#instanceTransforms.length * (shouldCacheProjectedData ? 128 : 16),
+          shouldCacheProjectedData ? (this.#source.meta.shN?.count ?? 0) * 15 * 16 : 0));
+      }
       const textureMap = new Map<SOGAttributeName, Texture>();
       cleanup.defer(() => {
         for (const texture of textureMap.values()) texture.dispose();
@@ -346,16 +374,32 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
       let webgpuCache: SOGWebGPUCache | undefined;
       let webglSorter: WebGLSortBackend | undefined;
       if (backend === 'webgpu') {
+        const sourceBounds = new Box3(
+          new Vector3(...this.#source.bounds.min),
+          new Vector3(...this.#source.bounds.max),
+        );
+        const logicalBounds = new Box3().makeEmpty();
+        for (const transform of this.#instanceTransforms) {
+          logicalBounds.union(sourceBounds.clone().applyMatrix4(transform));
+        }
+        const logicalCount = this.#source.count * this.#instanceTransforms.length;
         gpuSorter = await GpuRadixSorter.create(
           renderer,
-          this.#source.count,
-          { meansLow, meansHigh, width: meansImage.width },
+          logicalCount,
+          {
+            meansLow,
+            meansHigh,
+            width: meansImage.width,
+            sourceCount: this.#source.count,
+            translations: this.#instanceTransforms.map((transform) => new Vector3(
+              transform.elements[12]!,
+              transform.elements[13]!,
+              transform.elements[14]!,
+            )),
+          },
           new Vector3(...this.#source.meta.means.mins),
           new Vector3(...this.#source.meta.means.maxs),
-          new Box3(
-            new Vector3(...this.#source.bounds.min),
-            new Vector3(...this.#source.bounds.max),
-          ),
+          logicalBounds,
         );
         cleanup.defer(() => gpuSorter?.dispose());
         this.#diagnostics.radixBackend = gpuSorter.kind;
@@ -366,8 +410,6 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
         await gpuSorter.sortAsync(renderer);
         this.#diagnostics.sortDurationMs = now() - sortStartedAt;
         this.#diagnostics.sortCount += 1;
-        const shouldCacheProjectedData = this.#instanceTransforms.length > 1
-          || this.#source.count <= PROJECTED_CACHE_MAX_UNIQUE_SPLATS;
         if (shouldCacheProjectedData) {
           webgpuCache = new SOGWebGPUCache(
             materialTextures,
@@ -427,7 +469,7 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
         Math.exp(Math.max(...this.#source.meta.scales.codebook.filter(Number.isFinite))),
       );
       if (webgpuCache) geometry.setIndirect(webgpuCache.indirectAttribute);
-      if (this.#instanceTransforms.length > 1 && geometry.boundingBox) {
+      if (hasInstanceTransform && geometry.boundingBox) {
         const sourceBounds = geometry.boundingBox.clone();
         geometry.boundingBox.makeEmpty();
         for (const transform of this.#instanceTransforms) {
@@ -465,7 +507,10 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
         + (webgpuCache?.allocatedBytes ?? 0)
         + nativeTextureBytes
         + (256 * 4 * 4);
-      this.#diagnostics.allocatedCpuBytes = webglSorter?.cpuAllocatedBytes ?? 0;
+      this.#diagnostics.allocatedCpuBytes = webglSorter?.cpuAllocatedBytes
+        ?? ((gpuSorter?.allocatedBytes ?? 0)
+          + (webgpuCache?.allocatedBytes ?? 0)
+          + (256 * 4 * 4));
 
       const compileStartedAt = now();
       this.geometry.dispose();
@@ -562,9 +607,13 @@ export class SOGGaussianSplatMesh extends Mesh<InstancedBufferGeometry, NodeMate
       }
     }
     if (store.webgpuCache) {
-      const viewport = typeof renderer.getDrawingBufferSize === 'function'
-        ? renderer.getDrawingBufferSize(new Vector2())
-        : new Vector2(1, 1);
+      const target = renderer.getRenderTarget?.();
+      const viewport = new Vector2(1, 1);
+      if (target) viewport.set(target.viewport.z, target.viewport.w);
+      else if (typeof renderer.getViewport === 'function') {
+        const rectangle = renderer.getViewport(new Vector4());
+        viewport.set(rectangle.z, rectangle.w).multiplyScalar(renderer.getPixelRatio());
+      } else renderer.getDrawingBufferSize?.(viewport);
       const drawLimit = Math.max(0, Math.min(
         store.webgpuCache.logicalCount,
         Math.floor(this.geometry.instanceCount),

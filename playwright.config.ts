@@ -10,6 +10,7 @@ const testBaseUrl = `http://127.0.0.1:${testPort}`;
 export default defineConfig({
   testDir: './tests/browser',
   timeout: 30_000,
+  reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   snapshotPathTemplate: '{testDir}/{testFilePath}-snapshots/{arg}{ext}',
   use: {
     baseURL: testBaseUrl,
@@ -24,6 +25,6 @@ export default defineConfig({
   webServer: {
     command: `npm run example -- --host 127.0.0.1 --port ${testPort}`,
     url: testBaseUrl,
-    reuseExistingServer: true,
+    reuseExistingServer: !process.env.CI,
   },
 });

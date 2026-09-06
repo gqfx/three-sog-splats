@@ -66,6 +66,18 @@ describe('SOG v2 metadata', () => {
     expect(() => parseAndValidateMeta(meta, parseZipArchive(createBundle(meta)))).toThrowError(/shN\.files/);
   });
 
+  it('rejects antialiased and 2DGS models until their render equations are implemented', () => {
+    for (const patch of [
+      { antialias: true },
+      { model: 'antialiased' },
+      { model: '2dgs' },
+    ]) {
+      const input = { ...validMeta, ...patch };
+      expect(() => parseAndValidateMeta(input, parseZipArchive(createBundle(input))))
+        .toThrowError(/not supported yet/);
+    }
+  });
+
   it('validates v2 spherical-harmonic palette metadata and full-height textures', () => {
     const input = {
       ...validMeta,
@@ -131,4 +143,16 @@ describe('SOG v2 metadata', () => {
     expect(decodeCenter([0, 0, 0], [0, 128, 255], [-1, -1, -1], [1, 1, 1]))
       .toEqual(expect.arrayContaining([expect.any(Number), expect.any(Number), expect.any(Number)]));
   });
+});
+
+it('rejects finite inputs that overflow decoded GPU values', () => {
+  for (const patch of [
+    { means: { ...validMeta.means, maxs: [1000, 1000, 1000] } },
+    { scales: { ...validMeta.scales, codebook: Array(256).fill(1000) } },
+    { scales: { ...validMeta.scales, codebook: Array(256).fill(-1000) } },
+    { sh0: { ...validMeta.sh0, codebook: Array(256).fill(1e100) } },
+  ]) {
+    const input = { ...validMeta, ...patch };
+    expect(() => parseAndValidateMeta(input, parseZipArchive(createBundle(input)))).toThrow(/Float32/);
+  }
 });

@@ -75,6 +75,20 @@ export function parseAndValidateMeta(
   if (root.model !== undefined && root.model !== 'antialiased' && root.model !== '2dgs') {
     invalid('model must be "antialiased" or "2dgs" when present.');
   }
+  if (root.antialias === true || root.model === 'antialiased') {
+    throw new SOGError(
+      'UNSUPPORTED_SOURCE',
+      'Antialiased SOG assets are not supported yet; rendering them as standard 3D Gaussians would be incorrect.',
+      { stage: 'validation' },
+    );
+  }
+  if (root.model === '2dgs') {
+    throw new SOGError(
+      'UNSUPPORTED_SOURCE',
+      '2DGS assets are not supported yet; rendering them as standard 3D Gaussians would be incorrect.',
+      { stage: 'validation' },
+    );
+  }
   const count = finiteNumber(root.count, 'count');
   if (!Number.isSafeInteger(count) || count <= 0) invalid('count must be a positive safe integer.');
 
@@ -144,6 +158,21 @@ export function parseAndValidateMeta(
       }
     }
   }
+  // Check the representation consumed by shaders, including exponentiation.
+  for (const value of [...mins, ...maxs]) {
+    if (!Number.isFinite(Math.fround(Math.expm1(Math.abs(Math.fround(value)))))) {
+      invalid('decoded means must be representable as finite Float32 values.');
+    }
+  }
+  for (const value of normalized.scales.codebook) {
+    const scale = Math.fround(Math.exp(Math.fround(value)));
+    if (!Number.isFinite(scale) || scale <= 0) invalid('decoded scales must be positive finite Float32 values.');
+  }
+  for (const value of [...normalized.sh0.codebook, ...(normalized.shN?.codebook ?? [])]) {
+    if (!Number.isFinite(Math.fround(value)) || Math.abs(value) > 1e30) {
+      invalid('SH coefficients must be finite Float32 values with headroom for SH evaluation.');
+    }
+  }
   return normalized;
 }
 
@@ -162,7 +191,10 @@ export function getAttributeFiles(meta: SOGMetaV2): ReadonlyMap<SOGAttributeName
   return result;
 }
 
-export function validateImageDimensions(meta: SOGMetaV2, images: ReadonlyMap<SOGAttributeName, SOGNativeImage>): number {
+export function validateImageDimensions(meta: SOGMetaV2, images: ReadonlyMap<SOGAttributeName, Pick<SOGNativeImage, 'width' | 'height'>>): number {
+  for (const image of images.values()) {
+    if (!Number.isSafeInteger(image.width) || !Number.isSafeInteger(image.height) || image.width <= 0 || image.height <= 0) invalid('image dimensions must be positive safe integers.');
+  }
   const means = images.get('means_l');
   if (!means) invalid('decoded means_l image is missing.');
   if (meta.count > means.width * means.height) invalid('count exceeds the addressable pixels in the attribute images.');

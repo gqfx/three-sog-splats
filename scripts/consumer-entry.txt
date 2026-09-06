@@ -1,0 +1,30 @@
+import { SOGGaussianSplatMesh, SOGLoader } from 'three-sog-splats';
+import type { SOGLoadOptions, SOGPrepareOptions } from 'three-sog-splats';
+import { PerspectiveCamera, Scene, WebGPURenderer } from 'three/webgpu';
+
+const state: { state: string; backend?: string | null; error?: string; sorts?: number } = { state: 'loading' };
+Object.assign(window, { __CONSUMER__: state });
+const load: SOGLoadOptions = { maxImagePixels: 8388608, maxDecodedBytes: 268435456 };
+const prepare: SOGPrepareOptions = { maxGpuBytes: 536870912 };
+const renderer = new WebGPURenderer({ forceWebGL: new URLSearchParams(location.search).get('backend') === 'webgl' });
+renderer.setSize(64, 64);
+document.querySelector('#app')!.appendChild(renderer.domElement);
+const source = await new SOGLoader().loadAsync('/fixture.sog', load);
+const mesh = new SOGGaussianSplatMesh(source);
+try {
+  await mesh.prepare(renderer, prepare);
+  const scene = new Scene(); scene.add(mesh);
+  const camera = new PerspectiveCamera(50, 1, 0.01, 100); camera.position.z = 4;
+  renderer.setAnimationLoop(() => {
+    camera.position.x += 0.0001;
+    camera.lookAt(0, 0, 0);
+    renderer.render(scene, camera);
+    state.sorts = mesh.diagnostics.sortCount;
+    state.backend = mesh.diagnostics.backend;
+    state.state = 'ready';
+  });
+  Object.assign(window, { disposeConsumer: () => { renderer.setAnimationLoop(null); mesh.dispose(); source.dispose(); renderer.dispose(); } });
+} catch (error) {
+  state.state = 'failed'; state.error = String(error);
+  mesh.dispose(); source.dispose(); renderer.dispose();
+}

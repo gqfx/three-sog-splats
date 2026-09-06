@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SOGError } from '../../src/core/errors.js';
+import type { SOGNativeImage } from '../../src/core/types.js';
 import { SOG_MVP_MAX_SPLATS } from '../../src/core/types.js';
 import { SOGLoader } from '../../src/loader/SOGLoader.js';
 import {
@@ -55,6 +56,55 @@ describe('SOGLoader', () => {
     resource.dispose();
     resource.dispose();
     expect(decoder.closed).toBe(5);
+  });
+
+  it('enforces download/archive limits and isolates throwing progress listeners', async () => {
+    const archive = createBundle();
+    await expect(new SOGLoader().loadAsync('download-limit.sog', {
+      fetch: async () => bundleResponse(archive),
+      maxDownloadBytes: archive.byteLength - 1,
+      useArchiveWorker: false,
+    })).rejects.toMatchObject({ code: 'DOWNLOAD_FAILED', stage: 'download' });
+    await expect(new SOGLoader().loadAsync('archive-limit.sog', {
+      fetch: async () => bundleResponse(archive),
+      maxArchiveBytes: 1,
+      useArchiveWorker: false,
+    })).rejects.toMatchObject({ code: 'INVALID_ARCHIVE', stage: 'archive' });
+
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const resource = await new SOGLoader().loadAsync('progress-listener.sog', {
+      fetch: async () => bundleResponse(archive),
+      imageDecoder: new FakeImageDecoder(),
+      onProgress: () => { throw new Error('listener failure'); },
+      useArchiveWorker: false,
+    });
+    expect(resource.state).toBe('ready');
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+    resource.dispose();
+  });
+
+  it('preserves prototype-based decoder cleanup methods', async () => {
+    let closed = 0;
+    class PrototypeImage implements SOGNativeImage {
+      readonly attribute = 'means_l' as const;
+      readonly filename: string;
+      readonly width = 2;
+      readonly height = 2;
+      readonly source = { width: 2, height: 2 } as unknown as TexImageSource;
+
+      constructor(filename: string) { this.filename = filename; }
+      close(): void { closed += 1; }
+    }
+    const resource = await new SOGLoader().loadAsync('prototype-decoder.sog', {
+      fetch: async () => bundleResponse(createBundle()),
+      imageDecoder: {
+        decode: async (_bytes, filename) => new PrototypeImage(filename),
+      },
+      useArchiveWorker: false,
+    });
+    resource.dispose();
+    expect(closed).toBe(5);
   });
 
   it('rejects mismatched decoded dimensions and reports the failed stage', async () => {
@@ -199,4 +249,51 @@ describe('SOGLoader', () => {
     }
     expect(decoder.closed).toBe(50);
   });
+});
+
+it('enforces custom decoder output budgets and closes rejected images', async () => {
+  const decoder = new FakeImageDecoder(16384, 16384);
+  await expect(new SOGLoader().loadAsync('oversized.sog', {
+    fetch: async () => bundleResponse(createBundle()), imageDecoder: decoder, useArchiveWorker: false,
+  })).rejects.toMatchObject({ code: 'IMAGE_DECODE_FAILED' });
+  expect(decoder.closed).toBe(decoder.decoded);
+  const aggregate = new FakeImageDecoder();
+  await expect(new SOGLoader().loadAsync('aggregate.sog', {
+    fetch: async () => bundleResponse(createBundle()), imageDecoder: aggregate,
+    useArchiveWorker: false, maxDecodedBytes: 64,
+  })).rejects.toMatchObject({ code: 'IMAGE_DECODE_FAILED' });
+  expect(aggregate.closed).toBe(aggregate.decoded);
+});
+
+it('rejects oversized native headers before any browser decode', async () => {
+  const native = new FakeImageDecoder();
+  const decode = vi.spyOn(native, 'decode');
+  const decoder = Object.assign(native, { getDimensions: () => ({ width: 16384, height: 16384 }) });
+  await expect(new SOGLoader().loadAsync('headers.sog', {
+    fetch: async () => bundleResponse(createBundle()), imageDecoder: decoder, useArchiveWorker: false,
+  })).rejects.toMatchObject({ code: 'IMAGE_DECODE_FAILED' });
+  expect(decode).not.toHaveBeenCalled();
+});
+
+it('bounds concurrent image allocation and validates post-decode dimensions', async () => {
+  const native = new FakeImageDecoder();
+  let active = 0;
+  let peak = 0;
+  const decoder = {
+    decode: async (bytes: Uint8Array, filename: string, signal: AbortSignal) => {
+      active += 1; peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      active -= 1;
+      return native.decode(bytes, filename, signal);
+    },
+  };
+  const source = await new SOGLoader().loadAsync('concurrency.sog', {
+    fetch: async () => bundleResponse(createBundle()), imageDecoder: decoder, useArchiveWorker: false, decodeConcurrency: 2,
+  });
+  expect(peak).toBe(2); source.dispose();
+  expect(native.closed).toBe(5);
+  await expect(new SOGLoader().loadAsync('mismatch.sog', {
+    fetch: async () => bundleResponse(createBundle()),
+    imageDecoder: { ...decoder, getDimensions: () => ({ width: 4, height: 4 }) }, useArchiveWorker: false,
+  })).rejects.toMatchObject({ code: 'IMAGE_DIMENSION_MISMATCH' });
 });

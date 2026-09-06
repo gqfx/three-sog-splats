@@ -23,11 +23,12 @@ lattice for WebGPU memory, sorting, and overdraw stress. Generate it with
 For a less adversarial comparison, **Lion grid** downloads and decodes the
 existing 195,099-splat SH2 Lion exactly once, then batches 25 translated copies
 into one splat draw in a 5×5 layout. The copies share the source textures,
-one-time static dequantization cache, SH palette, and sort order. Their compact
-camera-dependent projections are refreshed only when the camera/model changes,
-so stationary frames run no compute. The logical render count is 4,877,475
-without storing or uploading 25 physical source payloads. Forced WebGL
-redirects this source to WebGPU.
+one-time static dequantization cache, and SH palette; one global logical-stream
+sort allows depth order to interleave across copies. Their compact camera-
+dependent projections are refreshed only when the camera/model changes, so
+stationary frames run no compute. The logical render count is 4,877,475 without
+storing or uploading 25 physical source payloads. Forced WebGL redirects this
+source to WebGPU.
 
 On cached WebGPU paths, contribution culling is enabled by default at threshold
 1. Camera/alpha, off-screen, and opacity-weighted projected-area rejection is
@@ -68,3 +69,10 @@ Design reference:
 
 `index.html` remains the instrumented browser-test harness used for diagnostics,
 controlled sort verification, cancellation, and snapshot regression tests.
+
+Run `npm run fixtures:fetch` before selecting Moon in a fresh checkout. The
+production build copies model license files into `dist/licenses/`. The main
+canvas example keeps visible model attribution; redistribution must retain the
+individual CC BY notices. Cold localhost loading is not a public-network
+throughput measurement. Use `npm run benchmark:release` and its optional network
+profile for production-build diagnostics.

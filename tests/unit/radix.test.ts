@@ -70,3 +70,14 @@ describe('portable radix sort oracle', () => {
   });
 
 });
+
+it('reuses scratch storage without corrupting subsequent depth sorts', async () => {
+  const { RadixSortWorkspace, radixSortKeyValues } = await import('../../src/render/sort/radix.js');
+  const workspace = new RadixSortWorkspace(4);
+  for (const values of [[9, 1, 3, 3], [0, 0xffffffff, 4, 2], [3, 3, 3, 3]]) {
+    workspace.readKeys.set(values);
+    const result = radixSortKeyValues(workspace.readKeys, undefined, 32, 8, workspace);
+    expect([...result.values]).toEqual(values.map((_, i) => i).sort((a, b) => values[a]! - values[b]!));
+    expect(result.keys.buffer).toBe(workspace.readKeys.buffer);
+  }
+});

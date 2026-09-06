@@ -1,0 +1,21 @@
+Title: Tomatoes (full-resolution SOG test conversion)
+Original title: Scan was created on my DIY automated rig.
+Author: Grail (https://superspl.at/user?id=grail)
+Original source: https://superspl.at/scene/2826d2c0
+Three.js source: https://github.com/mrdoob/three.js/blob/dev/examples/models/spz/tomatoes.v4.spz
+License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+License URL: https://creativecommons.org/licenses/by/4.0/
+
+Change made for this repository:
+- Transcoded all 445,409 Gaussians from SPZ v4 to bundled SOG v2 without
+  decimation, filtering, SH band reduction, or other data-reduction steps.
+
+Conversion tool:
+- @playcanvas/splat-transform 3.0.0
+- Source commit: daf63383f32effe5cd63faa67ff030d39bfa543e
+
+Converted SHA-256:
+992d569261421a85e8c2f08087172b01190c288036719b97938cb29b38d77c99
+
+Reproduction command:
+splat-transform -g 0 tomatoes.v4.spz tomatoes.sog

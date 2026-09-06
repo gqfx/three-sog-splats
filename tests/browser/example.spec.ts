@@ -23,6 +23,22 @@ async function waitForStableSort(page: Page): Promise<number> {
   throw new Error('SOG sort count did not become stable.');
 }
 
+async function requireWebGPU(
+  page: Page,
+  snapshot: { state: string; backend: string | null; error?: string | null },
+): Promise<void> {
+  const available = await page.evaluate(async () => {
+    const gpu = (navigator as Navigator & {
+      gpu?: { requestAdapter(): Promise<unknown | null> };
+    }).gpu;
+    return gpu ? (await gpu.requestAdapter()) !== null : false;
+  });
+  if (process.env.SOG_REQUIRE_WEBGPU === '1') expect(available, 'WebGPU is required for this release gate.').toBe(true);
+  test.skip(!available, 'WebGPU is unavailable in this browser environment.');
+  expect(snapshot.state, snapshot.error ?? undefined).toBe('ready');
+  expect(snapshot.backend).toBe('webgpu');
+}
+
 async function measureCanvasChromaticity(page: Page): Promise<{
   foregroundPixels: number;
   chromaticPixels: number;
@@ -120,7 +136,7 @@ for (const fixture of ['no-sh', 'sh'] as const) {
     await page.goto(`/?fixture=${fixture}`);
     await page.waitForFunction(() => ['ready', 'failed'].includes(window.__SOG_EXAMPLE__?.state));
     const snapshot = await page.evaluate(() => window.__SOG_EXAMPLE__);
-    if (snapshot.state !== 'ready' || snapshot.backend !== 'webgpu') test.skip(true, 'WebGPU is unavailable in this browser environment.');
+    await requireWebGPU(page, snapshot);
     await page.waitForFunction(() => (window.__SOG_EXAMPLE__?.diagnostics?.firstVisibleFrameDurationMs ?? 0) > 0);
     expect(snapshot.diagnostics?.readbackCount).toBe(0);
     expect(snapshot.diagnostics?.radixBackend).toMatch(/^(portable|onesweep)$/);
@@ -161,9 +177,7 @@ test('validates Portable radix edge fixtures on WebGPU when available', async ({
   await page.goto('/?fixture=no-sh');
   await page.waitForFunction(() => ['ready', 'failed'].includes(window.__SOG_EXAMPLE__?.state));
   const snapshot = await page.evaluate(() => window.__SOG_EXAMPLE__);
-  if (snapshot.state !== 'ready' || snapshot.backend !== 'webgpu') {
-    test.skip(true, 'WebGPU is unavailable in this browser environment.');
-  }
+  await requireWebGPU(page, snapshot);
   const fixtures = await page.evaluate(() => window.__SOG_EXAMPLE__.verifyPortableRadixFixtures());
   expect(Object.keys(fixtures)).toEqual([
     'empty',
@@ -190,9 +204,7 @@ test('validates OneSweep against Portable only on admitted hardware', async ({ p
   await page.goto('/?fixture=no-sh');
   await page.waitForFunction(() => ['ready', 'failed'].includes(window.__SOG_EXAMPLE__?.state));
   const snapshot = await page.evaluate(() => window.__SOG_EXAMPLE__);
-  if (snapshot.state !== 'ready' || snapshot.backend !== 'webgpu') {
-    test.skip(true, 'WebGPU is unavailable in this browser environment.');
-  }
+  await requireWebGPU(page, snapshot);
   const verification = await page.evaluate(
     () => window.__SOG_EXAMPLE__.verifyOneSweepIfAdmitted(),
   );
@@ -224,9 +236,7 @@ for (const backend of ['webgpu', 'webgl'] as const) {
     await page.goto(`/?fixture=real${backend === 'webgl' ? '&backend=webgl' : ''}`);
     await page.waitForFunction(() => ['ready', 'failed'].includes(window.__SOG_EXAMPLE__?.state));
     const snapshot = await page.evaluate(() => window.__SOG_EXAMPLE__);
-    if (backend === 'webgpu' && (snapshot.state !== 'ready' || snapshot.backend !== 'webgpu')) {
-      test.skip(true, 'WebGPU is unavailable in this browser environment.');
-    }
+    if (backend === 'webgpu') await requireWebGPU(page, snapshot);
     expect(snapshot.state, snapshot.error ?? undefined).toBe('ready');
     expect(snapshot.backend).toBe(backend);
     expect(snapshot.fixture).toBe('millipede.sog');
@@ -264,9 +274,7 @@ for (const backend of ['webgpu', 'webgl'] as const) {
     await page.goto(`/webgpu_sog.html?source=no-sh${backend === 'webgl' ? '&backend=webgl' : ''}`);
     await page.waitForFunction(() => ['ready', 'failed'].includes(window.__THREE_SOG_EXAMPLE__?.state));
     const initial = await page.evaluate(() => window.__THREE_SOG_EXAMPLE__);
-    if (backend === 'webgpu' && (initial.state !== 'ready' || initial.backend !== 'webgpu')) {
-      test.skip(true, 'WebGPU is unavailable in this browser environment.');
-    }
+    if (backend === 'webgpu') await requireWebGPU(page, initial);
     expect(initial.state, initial.error ?? undefined).toBe('ready');
     expect(initial.backend).toBe(backend);
     expect(initial.source).toBe('no-sh');
@@ -354,6 +362,19 @@ for (const backend of ['webgpu', 'webgl'] as const) {
       for (const element of elements) (element as HTMLElement).style.visibility = '';
     });
 
+    await page.locator('#source').selectOption('tomatoes');
+    await page.waitForFunction(() => {
+      const state = window.__THREE_SOG_EXAMPLE__;
+      return state?.state === 'ready' && state.source === 'tomatoes';
+    });
+    const tomatoesModel = await page.evaluate(() => window.__THREE_SOG_EXAMPLE__);
+    expect(tomatoesModel.backend).toBe(backend);
+    expect(tomatoesModel.splatCount).toBe(445_409);
+    expect(tomatoesModel.sourceSplatCount).toBe(445_409);
+    expect(tomatoesModel.runtimeCopyCount).toBe(1);
+    await expect(page.locator('#status')).toContainText('445,409 splats');
+    await expect(page.locator('#license')).toContainText('Grail');
+
     await page.locator('#source').selectOption('no-sh');
     await page.waitForFunction(() => {
       const state = window.__THREE_SOG_EXAMPLE__;
@@ -374,9 +395,7 @@ test('controlled profiler isolates cached rendering, resolution, and camera-upda
   await page.goto('/webgpu_sog.html?source=no-sh');
   await page.waitForFunction(() => ['ready', 'failed'].includes(window.__THREE_SOG_EXAMPLE__?.state));
   const initial = await page.evaluate(() => window.__THREE_SOG_EXAMPLE__);
-  if (initial.state !== 'ready' || initial.backend !== 'webgpu') {
-    test.skip(true, 'WebGPU is unavailable in this browser environment.');
-  }
+  await requireWebGPU(page, initial);
 
   await page.getByRole('button', { name: 'Analyze bottleneck' }).click();
   await page.waitForFunction(() => (
@@ -431,9 +450,7 @@ test('builds the 4.88M Lion grid from one downloaded and prepared source', async
   await page.goto('/webgpu_sog.html?source=lion-grid-5m');
   await page.waitForFunction(() => ['ready', 'failed'].includes(window.__THREE_SOG_EXAMPLE__?.state));
   const initial = await page.evaluate(() => window.__THREE_SOG_EXAMPLE__);
-  if (initial.state !== 'ready' || initial.backend !== 'webgpu') {
-    test.skip(true, 'WebGPU is unavailable in this browser environment.');
-  }
+  await requireWebGPU(page, initial);
 
   expect(initial.source).toBe('lion-grid-5m');
   expect(initial.sourceSplatCount).toBe(195_099);
@@ -485,6 +502,47 @@ test('builds the 4.88M Lion grid from one downloaded and prepared source', async
   expect(errors).toEqual([]);
 });
 
+test('loads the complete 4.93M Moon as one unique SH3 mesh', async ({ page }) => {
+  test.setTimeout(60_000);
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('console', (message) => {
+    if (/GPUValidationError|validation error|buffer is not big enough/i.test(message.text())) {
+      errors.push(message.text());
+    }
+  });
+  await page.goto('/webgpu_sog.html?source=moon-5m');
+  await page.waitForFunction(() => ['ready', 'failed'].includes(window.__THREE_SOG_EXAMPLE__?.state));
+  const initial = await page.evaluate(() => window.__THREE_SOG_EXAMPLE__);
+  await requireWebGPU(page, initial);
+
+  expect(initial.source).toBe('moon-5m');
+  expect(initial.sourceSplatCount).toBe(4_929_011);
+  expect(initial.runtimeCopyCount).toBe(1);
+  expect(initial.splatCount).toBe(4_929_011);
+  await expect(page.locator('#source')).toHaveValue('moon-5m');
+  await expect(page.locator('#status')).toContainText('4,929,011 splats');
+  await expect(page.locator('#license')).toContainText('Nicolas Diolez');
+  await page.waitForFunction(() => (window.__THREE_SOG_EXAMPLE__.performance?.sampleFrames ?? 0) >= 10);
+
+  const snapshot = await page.evaluate(() => ({
+    culling: window.__THREE_SOG_EXAMPLE__.cullingStats,
+    performance: window.__THREE_SOG_EXAMPLE__.performance,
+    resources: performance.getEntriesByType('resource').map((entry) => entry.name),
+  }));
+  expect(snapshot.performance?.projectedCacheEnabled).toBe(false);
+  expect(snapshot.performance?.contributionCullingEnabled).toBe(false);
+  expect(snapshot.performance?.sourceSplatCount).toBe(4_929_011);
+  expect(snapshot.performance?.runtimeCopyCount).toBe(1);
+  expect(snapshot.performance?.allocatedGpuBytes).toBeLessThan(300 * 1024 * 1024);
+  expect(snapshot.performance?.allocatedCpuBytes).toBeGreaterThan(90 * 1024 * 1024);
+  expect(snapshot.performance?.allocatedCpuBytes).toBeLessThan(150 * 1024 * 1024);
+  expect(snapshot.culling).toBeNull();
+  await expect(page.getByRole('button', { name: 'Read culling telemetry' })).toBeDisabled();
+  expect(snapshot.resources.filter((url) => url.endsWith('/moon.sog'))).toHaveLength(1);
+  expect(errors).toEqual([]);
+});
+
 test('decodes known WebP values without browser image transformations', async ({ page }) => {
   await page.goto('/');
   await page.waitForFunction(() => window.__SOG_EXAMPLE__?.state === 'ready');
@@ -501,4 +559,31 @@ test('decodes known WebP values without browser image transformations', async ({
       ).toBeLessThanOrEqual(channel === 3 ? 1 : fixtureExpected.webpChannelTolerance);
     }
   }
+});
+
+test('cached SH color agrees with an independent DC cancellation oracle and native rendering', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() => window.__SOG_EXAMPLE__?.state === 'ready');
+  await requireWebGPU(page, await page.evaluate(() => window.__SOG_EXAMPLE__));
+  const result = await page.evaluate(async () => {
+    const moduleUrl = '/regression.ts';
+    return (await import(/* @vite-ignore */ moduleUrl)).compareCachedColor();
+  });
+  for (let channel = 0; channel < 3; channel += 1) {
+    expect(result.native[channel]).toBeCloseTo(0.9, 2);
+    expect(Math.abs(result.cached[channel] - result.native[channel])).toBeLessThan(0.01);
+  }
+});
+
+test('Tomatoes keeps applying sorted orders during sustained WebGL motion', async ({ page }) => {
+  await page.goto('/webgpu_sog.html?source=tomatoes&backend=webgl');
+  await page.waitForFunction(() => window.__THREE_SOG_EXAMPLE__?.state === 'ready');
+  const start = await page.evaluate(() => {
+    window.__THREE_SOG_EXAMPLE__.startCameraMotion();
+    return window.__THREE_SOG_EXAMPLE__.totalSortCount;
+  });
+  await page.waitForTimeout(2500);
+  const end = await page.evaluate(() => window.__THREE_SOG_EXAMPLE__.totalSortCount);
+  expect(end - start).toBeGreaterThan(3);
+  await page.evaluate(() => window.__THREE_SOG_EXAMPLE__.stopCameraMotion());
 });

@@ -1,0 +1,20 @@
+[
+  {
+    "sceneUrl": "https://superspl.at/scene/2ac8f423",
+    "checkedOn": "2026-09-05",
+    "author": "Nicolas Diolez",
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "evidence": "Canonical scene HTML contains license link and attribution label",
+    "pageSha256": "5dd983af26971fece4a01a6266ca801cbfbfa61ce28a7add2013a2de2e4cf5e5"
+  },
+  {
+    "sceneUrl": "https://superspl.at/scene/2826d2c0",
+    "checkedOn": "2026-09-05",
+    "author": "Grail",
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "evidence": "Canonical scene HTML contains license link and attribution label",
+    "pageSha256": "3974e818c1e06242b491908433e664e5efbc7570c52f47b5ffcfc7e159044d9a"
+  }
+]

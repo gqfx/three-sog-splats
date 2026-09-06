@@ -3,18 +3,51 @@
 ## Guardrail
 
 The loader rejects resources above 5,000,000 splats. Including adaptive keys,
-the exact Portable radix storage is 100,156,900 bytes at that limit; the
-24-bit OneSweep layout is 104,005,900 bytes. These figures cover key/value
+the exact Portable radix storage is 100,156,916 bytes at that limit; the
+24-bit OneSweep layout is 104,005,916 bytes. These figures cover key/value
 ping-pong and exact scratch buffers, but not source textures or renderer-owned
-uniform storage. The public planning constant remains 52 GPU bytes per splat,
-or 260,000,000 bytes at the limit.
+uniform storage; the final 16 bytes hold the identity-copy translation used by
+logical-stream key generation. The public planning constant remains 52 GPU
+bytes per splat, or 260,000,000 bytes at the limit.
 
 The limit does not reserve memory. Decoded browser images, framebuffer targets,
 Three.js renderer state, driver allocations, and other scene content add to the
 number. Applications should use a lower limit on memory-constrained devices and
 benchmark their actual asset, camera motion, SH band, output size, and backend.
 
-## Recorded baseline
+## Current resource policies (2026-09-05)
+
+loadAsync enforces actual DEFLATE output counts, not only ZIP declarations.
+The default native-image budgets are 8192 per dimension, 8,388,608 pixels per
+image and 256 MiB of total decoded RGBA, with two concurrent decodes. Native
+PNG/WebP headers are inspected before allocation. Custom decoders are trusted
+application code and own internal allocation safety; their returned dimensions
+are still checked. Animated PNG/WebP is rejected.
+
+prepare checks the active device's texture/storage limits and accepts
+maxGpuBytes (default 512 MiB tracked allocations) and maxProjectedCacheBytes
+(default 256 MiB; zero disables caching). Admission uses estimated bytes
+including SH and logical copies, replacing the fixed one-million-unique cutoff.
+Translation batches require a cache that fits these budgets. Browser images,
+framebuffers and driver memory still require separate headroom.
+
+The cache retains native DC and scale labels, evaluates SH before clamping the
+final color and uses Float32 projected ellipses. This trades eight additional
+GPU/CPU bytes per cached logical splat for avoiding half-float overflow and
+underflow. WebGL radix scratch is now persistent and included in CPU allocation
+diagnostics; retained bytes may rise while per-frame allocation/GC falls.
+
+Current production-build measurements, network conditions, source fingerprint
+and raw data are linked from [the remediation record](./remediation-2026-09-05.md).
+The first-frame and WebGPU sort durations are CPU-side hook/submission timings,
+not a GPU completion or display-present timestamp. Use GPU timestamp queries
+and frame distributions to assess execution speed.
+
+## Historical recorded baseline
+
+The following August measurements predate the September safety/cache changes.
+They describe their original environment and implementation, not current bounds
+or a cross-device performance guarantee.
 
 ### Full-resolution WebGPU interaction baseline
 
@@ -41,7 +74,10 @@ stable radix sort. Portable uses 4-bit digits, 2,048 keys per workgroup,
 hierarchical Blelloch scans, and stable ranked scatter. OneSweep uses 8-bit
 digits, an all-pass histogram, subgroup ranking, chained lookback, and
 coalesced scatter, but is never dispatched unless the conservative NVIDIA
-subgroup policy admits the active renderer.
+subgroup policy admits the active renderer. The policy requires correlated
+adapter identity and `subgroupMinSize === subgroupMaxSize === 32`; because
+Three.js does not currently expose correlated adapter information, the default
+production resolver stays on Portable.
 
 The following 180-frame windows were recorded on 2026-08-16 in Headless Chrome
 151 at 960x640, DPR 1. `sort timing` is CPU command-submission time for WebGPU
@@ -63,12 +99,13 @@ and Worker execution time for forced WebGL, not GPU elapsed time.
 | forced WebGL / Lion SH2 / recovered | 68.3 | 27.1 ms | 0/s | 8.4 ms |
 
 Portable reported 16 rounded radix bits for both full models. It retained
-116,374 and 195,099 active splats, zero readbacks, and zero CPU sort allocation;
-estimated total GPU allocations were 4,674,440 and 10,698,036 bytes. Forced
+116,374 and 195,099 active splats and zero readbacks. WebGPU storage attributes
+also retain typed-array backing memory, which current `allocatedCpuBytes`
+diagnostics report instead of incorrectly claiming zero CPU allocation. Forced
 WebGL retained one preparation-time center readback and reported no radix
-backend. The local adapter selected Portable with `unsupported-vendor`, so
-OneSweep execution remains a compatible-NVIDIA hardware-conditioned result;
-r184-r185 compilation and safety-policy coverage passed locally.
+backend. Production selection now stays Portable with `adapter-unavailable`
+until Three.js can expose correlated adapter identity; r184-r185 compilation and
+safety-policy coverage pass locally.
 
 Sorting is suppressed on an unchanged view. The subsequent projected-cache
 optimization also suppresses projection and SH refresh on an unchanged view;
@@ -94,12 +131,18 @@ A single five-million-unique-splat resource is not admitted to the projected
 cache, avoiding hundreds of megabytes of storage with little benefit in the
 overdraw-dominated synthetic lattice.
 
+Loader defaults also cap a compressed response at 128 MiB, one uncompressed ZIP
+entry at 128 MiB, and the total declared uncompressed archive at 256 MiB. These
+limits are configurable through `SOGLoadOptions`; both `Content-Length` and the
+actual streamed byte count are enforced before archive extraction.
+
 ### Five-million-splat stress scene
 
 The synthetic CC0 lattice contains exactly 5,000,000 addressable Gaussians in
 4096x1221 attribute textures. On the local WebGPU Portable path it prepared in
-about 156 ms, selected 20 radix bits, retained zero CPU sort allocation and zero
-readbacks, and reported 200,185,316 estimated GPU bytes. At 960x640 DPR 1 the
+about 156 ms, selected 20 radix bits, retained zero readbacks, and reported
+about 200 MB estimated GPU storage. Current diagnostics additionally expose
+the roughly 100 MB of retained radix typed-array backing storage. At 960x640 DPR 1 the
 stationary shading workload measured about 5.6 FPS (178.2 ms average frame,
 422.3 ms p95). This is intentionally a memory and overdraw stress case; forced
 WebGL automatically redirects it to WebGPU.

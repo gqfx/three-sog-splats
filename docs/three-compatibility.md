@@ -31,8 +31,8 @@ Primary sources:
 
 ## Runtime verification
 
-The same 13 Playwright cases were run against the official r184 and r185 npm
-artifacts in Headless Chrome with WebGPU enabled. Both runs passed:
+The same 16 Playwright cases were run against the official r184 and r185 npm
+artifacts in Headless Chrome with WebGPU enabled. Both runs passed on the 2026-09-05 working tree (see docs/acceptance.md):
 
 - internal synthetic no-SH and SH SOG rendering on WebGPU;
 - internal synthetic no-SH and SH rendering on the forced WebGL backend;
@@ -57,3 +57,11 @@ unpacked official Three.js package:
 ```bash
 THREE_COMPAT_ROOT=/path/to/three-r184 npm run test:browser
 ```
+
+
+The current browser matrix also covers the 4.93M unique Moon SH3 asset, sustained
+Tomatoes WebGL sorting and a synthetic DC+SH color oracle. Clean tarballs are
+installed into r184/r185 consumers and exercised through Vite production
+preview with real workers and drawing. Cache admission is now based on bytes,
+and projected ellipses use Float32. The earlier historical allocation figures
+are not a compatibility guarantee.

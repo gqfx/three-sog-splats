@@ -103,7 +103,7 @@ export class OneSweepRadixSortBackend implements RadixSortBackend {
     count: number,
     inputKeys: StorageBufferAttribute,
     bits: number,
-    subgroupMinSize = 32,
+    subgroupSize = 32,
   ) {
     if (!Number.isInteger(bits) || bits < 0 || bits > 32 || bits % ONESWEEP_RADIX_BITS !== 0) {
       throw new RangeError('OneSweep radix bit count must be a multiple of 8 in the range 0..32.');
@@ -111,8 +111,8 @@ export class OneSweepRadixSortBackend implements RadixSortBackend {
     if (inputKeys.count < Math.max(1, count)) {
       throw new RangeError('OneSweep radix input key capacity is smaller than the active count.');
     }
-    if (!Number.isFinite(subgroupMinSize) || subgroupMinSize <= 0 || subgroupMinSize > 32) {
-      throw new RangeError('OneSweep requires a reported subgroup minimum in the range 1..32.');
+    if (subgroupSize !== 32) {
+      throw new RangeError('OneSweep requires a fixed 32-lane subgroup size.');
     }
     this.count = count;
     this.capacity = Math.max(1, count);
@@ -121,7 +121,7 @@ export class OneSweepRadixSortBackend implements RadixSortBackend {
     this.#threadBlocks = Math.max(1, Math.ceil(count / ONESWEEP_PARTITION_SIZE));
     this.#maxSubgroups = Math.min(
       MAX_SUBGROUPS_LIMIT,
-      Math.max(1, Math.ceil(ONESWEEP_WORKGROUP_SIZE / subgroupMinSize)),
+      Math.max(1, Math.ceil(ONESWEEP_WORKGROUP_SIZE / subgroupSize)),
     );
     this.#keyAttributes = [createUintAttribute(this.capacity), createUintAttribute(this.capacity)];
     this.#valueAttributes = [createUintAttribute(this.capacity), createUintAttribute(this.capacity)];

@@ -66,7 +66,6 @@ const bytes = async (name) => new Uint8Array(await readFile(resolve(fixtureRoot,
 const commonMeta = {
   version: 2,
   count: 4,
-  model: 'antialiased',
   means: { mins: [-1, -1, -1], maxs: [1, 1, 1], files: ['means_l.webp', 'means_u.webp'] },
   scales: { codebook, files: ['scales.webp'] },
   quats: { files: ['quats.webp'] },

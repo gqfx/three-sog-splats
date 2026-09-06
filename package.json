@@ -6,11 +6,14 @@
   "sideEffects": false,
   "files": [
     "dist",
+    "src",
     "docs",
     "README.md",
     "README.zh-CN.md",
     "THIRD_PARTY_NOTICES.md",
-    "LICENSE"
+    "LICENSE",
+    "SECURITY.md",
+    "CHANGELOG.md"
   ],
   "exports": {
     ".": {
@@ -29,11 +32,18 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:browser": "playwright test",
-    "test:package": "node scripts/test-package.mjs",
+    "test:browser:r184": "node scripts/test-browser-compat.mjs 0.184.0",
+    "test:package": "node scripts/test-package.mjs 0.184.0 && node scripts/test-package.mjs 0.185.0",
     "benchmark": "npm run build && node scripts/benchmark.mjs",
     "generate:5m": "node scripts/generate-five-million-fixture.mjs",
-    "test:acceptance": "npm run typecheck && npm run lint && npm run test && npm run build && npm run build:example && npm run test:browser && npm run test:package",
-    "example": "vite --config examples/vite.config.ts"
+    "test:acceptance": "npm run typecheck && npm run lint && npm run test && npm run build && npm run build:example && npm run test:browser && npm run test:browser:r184 && npm run test:package",
+    "example": "vite --config examples/vite.config.ts",
+    "prepack": "npm run build && node scripts/check-package.mjs",
+    "prepublishOnly": "npm run test:acceptance",
+    "fixtures:verify": "node scripts/fetch-fixtures.mjs --verify",
+    "fixtures:fetch": "node scripts/fetch-fixtures.mjs",
+    "test:browser:required": "SOG_REQUIRE_WEBGPU=1 playwright test",
+    "benchmark:release": "npm run build:example && node scripts/benchmark-release.mjs"
   },
   "keywords": [
     "three.js",
@@ -60,5 +70,16 @@
     "typescript-eslint": "^8.39.1",
     "vite": "^7.1.2",
     "vitest": "^3.2.4"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gqfx/three-sog-splats.git"
+  },
+  "bugs": {
+    "url": "https://github.com/gqfx/three-sog-splats/issues"
+  },
+  "homepage": "https://github.com/gqfx/three-sog-splats#readme",
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

@@ -1,6 +1,34 @@
-# Phase-one acceptance record
+# Current acceptance — 2026-09-05
 
-Date: 2026-08-16
+The reviewed working tree (base commit `011c16c`, including uncommitted changes)
+passes `SOG_REQUIRE_WEBGPU=1 npm run test:acceptance`: typecheck, lint,
+134 unit/integration tests, library and production example builds, 16 browser
+cases on each of Three.js r184 and r185, and real production consumers of clean
+npm packs on both versions. WebGPU was required and executed on the local
+Apple M4; OneSweep execution remains unvalidated because its adapter policy is
+not admitted. The production consumers loaded an SH archive, started the packed
+archive/image/sort workers, rendered, updated sorting and disposed resources.
+
+The added regressions cover actual DEFLATE size overruns, image header/decoded
+budgets, bounded decode concurrency, bitmap cancellation and worker reuse,
+continuous slow-worker sorting, render-target restoration, numeric overflow,
+GPU/cache budgets, and a real GPU DC+SH cancellation oracle comparing cached
+and native rendering. No screenshot baselines were weakened or regenerated.
+
+The exact source fingerprint and measurement results are recorded in
+[the remediation record](./remediation-2026-09-05.md). GitHub workflow YAML was
+parsed locally; remote Actions and repository branch/security settings have not
+been activated or certified by these local checks. Firefox/Safari, mobile
+hardware and XR are not part of this acceptance claim.
+
+The August record below is retained as historical context, not the current
+release certificate. Its allocations and timing figures predate the fixes.
+
+---
+
+# Historical phase-one acceptance record
+
+Date: 2026-08-17
 
 Compatibility window: Three.js 0.184.0-0.185.0
 
@@ -12,7 +40,7 @@ Compatibility window: Three.js 0.184.0-0.185.0
 | Direct Three.js API boundary | No renderer adapter; contract scan over every source file; clean official r184/r185 builds used in browser tests | Pass |
 | Explicit preparation | Texture/codebook initialization, initial sort, material/compute compilation, visibility gate, abort/failure cleanup | Pass |
 | WebGPU path | Weighted adaptive keys, stable 4-bit Portable radix, guarded 8-bit OneSweep, GPU order consumption, one-time static dequantization, camera-change projection/SH cache, stable contribution/frustum compaction, indexed indirect drawing, stationary compute suppression, zero production readbacks, and explicit sort/culling verification | Pass |
-| Radix safety policy | Deterministic admission tests reject missing subgroup signals, non-NVIDIA/ambiguous adapters, custom devices, and unsafe subgroup sizes; local browser reports Portable with `unsupported-vendor` | Pass |
+| Radix safety policy | Deterministic admission tests reject missing subgroup signals, non-NVIDIA/ambiguous adapters, custom devices, variable/non-32 subgroup ranges, and uncorrelated adapter identity; production does not infer identity from a second adapter request | Pass |
 | forced WebGL fallback | One center readback with framebuffer-row normalization, Worker sort and pooled result transfer, instanced order upload, static suppression, stale-result disposal | Pass |
 | Scene/depth integration | Tolerant browser baselines include object transform and an opaque foreground occluder; depth test on and depth writes off | Pass |
 | Real assets | All 116,374 Millipede Gaussians and all 195,099 Lion Gaussians with SH2 from Three.js converted directly to SOG without decimation; WebGPU and forced WebGL snapshots | Pass |
@@ -25,8 +53,8 @@ Release validation is run with `npm run test:acceptance`, which includes the
 browser and external-consumer gates. The final command record is updated
 whenever the compatibility baseline or fixture output changes.
 
-Final run: typecheck, lint, declaration and example builds, 111 unit/integration
-tests, 13 real-browser tests on both r184 and r185, and the external
+Final run: typecheck, lint, declaration and example builds, 119 unit/integration
+tests, 14 real-browser tests on both r184 and r185, and the external
 package-consumer check all passed. The browser run exercised WebGPU and forced
 WebGL for internal synthetic no-SH/SH fixtures and the full-resolution
 116,374-Gaussian Millipede fixture without decimation. The two public-example
@@ -49,7 +77,8 @@ channels rather than collapsing the rendered model to grayscale.
 The local Chrome adapter was not an admitted NVIDIA target. Its OneSweep
 result is therefore explicitly hardware-conditioned: source/API compilation
 and deterministic policy coverage passed on r184-r185, while execution was
-skipped with `unsupported-vendor`; Portable executed the full browser matrix.
+skipped with `adapter-unavailable` because Three.js does not expose correlated
+adapter identity; Portable executed the full browser matrix.
 
 The real SH regression also verifies that `shN.count` and `shN.bands` drive the
 centroid-palette geometry, object transforms evaluate SH in local space, and

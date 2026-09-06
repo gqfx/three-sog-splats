@@ -75,3 +75,6 @@ temp/
 ._*
 Thumbs.db
 Desktop.ini
+
+# Reconstructed on demand from pinned upstream files (npm run fixtures:fetch).
+tests/fixtures/generated/moon.sog

@@ -47,6 +47,11 @@ export interface SOGBounds {
   readonly halfExtents: SOGVec3;
 }
 
+export interface SOGImageDimensions {
+  readonly width: number;
+  readonly height: number;
+}
+
 export interface SOGNativeImage {
   readonly attribute: SOGAttributeName;
   readonly filename: string;
@@ -88,9 +93,25 @@ export interface SOGLoadOptions {
   readonly imageDecoder?: SOGImageDecoder;
   readonly dedupeKey?: string;
   readonly useArchiveWorker?: boolean;
+  /** Maximum compressed response size. Defaults to 128 MiB. */
+  readonly maxDownloadBytes?: number;
+  /** Maximum uncompressed size of one ZIP entry. Defaults to 128 MiB. */
+  readonly maxArchiveEntryBytes?: number;
+  /** Maximum total uncompressed size of all ZIP entries. Defaults to 256 MiB. */
+  readonly maxArchiveBytes?: number;
+  /** Maximum width or height of any attribute image. Defaults to 8192. */
+  readonly maxImageDimension?: number;
+  /** Maximum pixels in one attribute image. Defaults to 8,388,608. */
+  readonly maxImagePixels?: number;
+  /** Total decoded RGBA image budget. Defaults to 256 MiB. */
+  readonly maxDecodedBytes?: number;
+  /** Concurrent image decodes (1..7). Defaults to 2. */
+  readonly decodeConcurrency?: number;
 }
 
 export interface SOGImageDecoder {
+  /** Optional pre-allocation inspection. Custom decoders own their allocation safety. */
+  getDimensions?(bytes: Uint8Array, filename: string): SOGImageDimensions;
   decode(
     bytes: Uint8Array,
     filename: string,
@@ -105,6 +126,10 @@ export type SOGRadixBackendKind = 'portable' | 'onesweep';
 
 export interface SOGPrepareOptions {
   readonly signal?: AbortSignal;
+  /** Budget for tracked SOG GPU allocations, excluding renderer overhead. Default 512 MiB. */
+  readonly maxGpuBytes?: number;
+  /** Maximum projected-cache allocation. Default 256 MiB; zero disables it. */
+  readonly maxProjectedCacheBytes?: number;
 }
 
 export interface SOGContributionCullingStats {

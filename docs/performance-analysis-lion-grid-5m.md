@@ -14,9 +14,10 @@ Backend: WebGPU, Portable radix (16 bits, `unsupported-vendor` selection)
 
 The Example downloads and decodes the existing 3,287,509-byte `lion.sog`
 once. It now submits the 5×5 grid as one batched splat draw. All copies share
-one source payload, one static dequantization cache, and one 195,099-entry depth
-order; only their camera-dependent projected centers, ellipses, and SH colors
-have per-copy cache entries.
+one source payload and one static dequantization cache. A 4,877,475-entry
+logical-stream depth order lets splats from different copies interleave;
+camera-dependent projected centers, ellipses, and SH colors have per-copy cache
+entries.
 
 ## Implemented hot-path changes
 
@@ -24,7 +25,7 @@ have per-copy cache entries.
 2. The quad uses four indexed corners instead of six duplicated vertices.
 3. A preparation compute pass dequantizes center, quaternion, scale, base color,
    SH labels, and the SH palette once into compact GPU storage.
-4. Camera/model changes run two compute stages: the existing shared radix sort
+4. Camera/model changes run two compute stages: the global logical-stream radix sort
    and a projection/SH refresh. Unchanged frames run zero compute passes.
 5. The vertex shader reads cached clip center, packed ellipse, and packed color;
    it no longer samples SOG textures, runs exponentials, reconstructs

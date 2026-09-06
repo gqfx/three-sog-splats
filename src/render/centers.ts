@@ -88,12 +88,16 @@ async function decodeCenters(
     stencilBuffer: false,
   });
   target.texture.name = 'sog-center-readback';
-  const previous = renderer.getRenderTarget();
   try {
     renderer.initRenderTarget(target);
     await renderer.compileAsync(quad, quad.camera);
-    renderer.setRenderTarget(target);
-    quad.render(renderer);
+    const previous = renderer.getRenderTarget();
+    try {
+      renderer.setRenderTarget(target);
+      quad.render(renderer);
+    } finally {
+      renderer.setRenderTarget(previous);
+    }
     const pixels = await renderer.readRenderTargetPixelsAsync(
       target,
       0,
@@ -106,7 +110,6 @@ async function decodeCenters(
       : new Float32Array(pixels.buffer, pixels.byteOffset, Math.floor(pixels.byteLength / 4));
     return unpackWebGLCenterReadback(rgba, textures.width, textures.height, meta.count);
   } finally {
-    renderer.setRenderTarget(previous);
     target.dispose();
     material.dispose();
   }

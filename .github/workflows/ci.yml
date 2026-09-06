@@ -1,0 +1,58 @@
+name: Validation
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ['22.12.0', '24']
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: npm pack --dry-run
+      - run: npm audit --omit=dev --audit-level=high
+  browsers:
+    runs-on: macos-14
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        three: ['0.184.0', '0.185.0']
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run fixtures:fetch
+      - run: npm run fixtures:verify
+      - run: npm run build:example
+      - name: Browser compatibility (reports unavailable GPU explicitly)
+        run: node scripts/test-browser-compat.mjs '${{ matrix.three }}'
+      - name: Published package production consumer
+        run: node scripts/test-package.mjs '${{ matrix.three }}'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: browser-${{ matrix.three }}
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore

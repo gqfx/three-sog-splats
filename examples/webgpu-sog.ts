@@ -24,7 +24,7 @@ import {
   type BottleneckScenario,
 } from './bottleneck-analysis.js';
 
-type SourceKey = 'no-sh' | 'sh' | 'stress-5m' | 'lion-grid-5m';
+type SourceKey = 'no-sh' | 'sh' | 'tomatoes' | 'moon-5m' | 'stress-5m' | 'lion-grid-5m';
 type SOGDrawMesh = Mesh<SOGGaussianSplatMesh['geometry'], SOGGaussianSplatMesh['material']>;
 
 interface FramePerformanceMetrics {
@@ -63,6 +63,8 @@ interface FramePerformanceMetrics {
   readonly triangles: number;
   readonly computePasses: number;
   readonly rendererMemoryBytes: number;
+  readonly allocatedGpuBytes: number;
+  readonly allocatedCpuBytes: number;
   readonly viewport: {
     readonly width: number;
     readonly height: number;
@@ -74,6 +76,7 @@ interface SourceDefinition {
   readonly name: string;
   readonly url: string;
   readonly cameraDirection: Vector3;
+  readonly cameraDistanceMultiplier?: number;
   readonly rotation?: Euler;
   readonly scale?: number;
   readonly runtimeGrid?: {
@@ -150,6 +153,31 @@ const sources: Record<SourceKey, SourceDefinition> = {
       licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
     },
   },
+  tomatoes: {
+    name: 'Tomatoes · full 445,409 · SH3',
+    url: '/tomatoes.sog',
+    cameraDirection: new Vector3(0, 0.35, 1),
+    credit: {
+      author: 'Grail',
+      authorUrl: 'https://superspl.at/user?id=grail',
+      source: 'https://superspl.at/scene/2826d2c0',
+      license: 'CC BY 4.0',
+      licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
+    },
+  },
+  'moon-5m': {
+    name: 'Moon · full 4,929,011 · SH3',
+    url: '/moon.sog',
+    cameraDirection: new Vector3(-0.12, -0.955, 0.273),
+    cameraDistanceMultiplier: 0.44,
+    credit: {
+      author: 'Nicolas Diolez',
+      authorUrl: 'https://superspl.at/user/nicolasdiolez',
+      source: 'https://superspl.at/scene/2ac8f423',
+      license: 'CC BY 4.0',
+      licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
+    },
+  },
   'stress-5m': {
     name: 'Synthetic lattice · 5,000,000 · no SH',
     url: '/five-million.sog',
@@ -174,6 +202,8 @@ const sources: Record<SourceKey, SourceDefinition> = {
 const parameters = new URLSearchParams(location.search);
 const requestedSource = parameters.get('source');
 const initialSource: SourceKey = requestedSource === 'sh'
+  || requestedSource === 'tomatoes'
+  || requestedSource === 'moon-5m'
   || requestedSource === 'stress-5m'
   || requestedSource === 'lion-grid-5m'
   ? requestedSource
@@ -421,6 +451,8 @@ function updateFrameMetrics(timestamp: number, cpuSubmitDurationMs: number): voi
       : renderer.info.render.triangles,
     computePasses: renderer.info.compute.frameCalls,
     rendererMemoryBytes: renderer.info.memory.total,
+    allocatedGpuBytes: renderDiagnostics?.allocatedGpuBytes ?? 0,
+    allocatedCpuBytes: renderDiagnostics?.allocatedCpuBytes ?? 0,
     viewport: {
       width: innerWidth,
       height: innerHeight,
@@ -568,7 +600,11 @@ function fitCamera(
   controls.minDistance = radius * 0.25;
   controls.maxDistance = radius * 10;
   controls.target.copy(sphere.center);
-  camera.position.copy(source.cameraDirection).normalize().multiplyScalar(distance * 1.15).add(sphere.center);
+  camera.position
+    .copy(source.cameraDirection)
+    .normalize()
+    .multiplyScalar(distance * (source.cameraDistanceMultiplier ?? 1.15))
+    .add(sphere.center);
   camera.near = Math.max(distance / 1_000, 0.001);
   camera.far = Math.max(distance * 10, 10);
   camera.updateProjectionMatrix();
@@ -1097,8 +1133,8 @@ function disposeSelection(): void {
 }
 
 async function loadSource(key: SourceKey): Promise<void> {
-  if ((key === 'stress-5m' || key === 'lion-grid-5m') && forceWebGL) {
-    status.textContent = 'The 5M stress scene requires WebGPU; switching backend…';
+  if ((key === 'moon-5m' || key === 'stress-5m' || key === 'lion-grid-5m') && forceWebGL) {
+    status.textContent = 'The 5M scene requires WebGPU; switching backend…';
     const next = new URL(location.href);
     next.searchParams.set('source', key);
     next.searchParams.delete('backend');

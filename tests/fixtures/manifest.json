@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "files": [
+    {
+      "file": "minimal-no-sh.sog",
+      "sha256": "f45d31a902766d5ed568855d92b192d14f21fa73a360cba7f191995399f23905",
+      "bytes": 7271
+    },
+    {
+      "file": "minimal-sh1.sog",
+      "sha256": "4bb4f37142a5fe13c7b59cb1fd4d687a7c2bcfda4cfcee9aefe0bd5dbfc03737",
+      "bytes": 10537
+    },
+    {
+      "file": "five-million.sog",
+      "sha256": "f056ab2b2152e6f83f78130406365e1ced1194b49847ac25c58dda2f7a0c7146",
+      "bytes": 119217
+    },
+    {
+      "file": "millipede.sog",
+      "sha256": "abf26297b67b7166a71b80976ca562e36183be7c86d4246351807aa8d71c7910",
+      "bytes": 1569591
+    },
+    {
+      "file": "lion.sog",
+      "sha256": "8031eb184edf7d58affa4d72498d3e75f8144b2d0a9c524458b4783988263b44",
+      "bytes": 3287509
+    },
+    {
+      "file": "tomatoes.sog",
+      "sha256": "992d569261421a85e8c2f08087172b01190c288036719b97938cb29b38d77c99",
+      "bytes": 6616930
+    },
+    {
+      "file": "moon.sog",
+      "sha256": "70b427c1673058954b6ad80e48a65bd78d631834206f199a2acdce07968c11c8",
+      "bytes": 67214069,
+      "source": "https://d28zzqy0iyovbz.cloudfront.net/2ac8f423/v1/",
+      "zipMtime": [
+        2020,
+        0,
+        1,
+        0,
+        0,
+        0
+      ],
+      "entries": [
+        {
+          "name": "meta.json",
+          "sha256": "0c76e2c3f45690f3500e72e76c5ba6f31ef31bd479d0061bdcfc0402d532498b",
+          "bytes": 15683
+        },
+        {
+          "name": "means_l.webp",
+          "sha256": "af7350817d8b8f31551420d242671b8b0375d0002c497601271c691f53388525",
+          "bytes": 12777096
+        },
+        {
+          "name": "means_u.webp",
+          "sha256": "60c3a858b72218d3b2747b2fd22287f39a4bf12f7b13351e271975b5134d3f93",
+          "bytes": 1574318
+        },
+        {
+          "name": "quats.webp",
+          "sha256": "2f513d6ff8adcec5557a43b9af767f9ce406a63623154273b2764e943bdb6d69",
+          "bytes": 15158524
+        },
+        {
+          "name": "scales.webp",
+          "sha256": "383c7262345d97014b1ec65928f15f652ba9a52477a40e79d4d8bff0033f5c5b",
+          "bytes": 13460044
+        },
+        {
+          "name": "sh0.webp",
+          "sha256": "8ada9eb685e9ef6101b16c63133029e0c973ae904f5c0b617acd16e6ab3a5a7b",
+          "bytes": 13119732
+        },
+        {
+          "name": "shN_centroids.webp",
+          "sha256": "c5ab6495d3730a5019a53a8290eac1f9dc4da1f6a1445bde3687116d3bee1bba",
+          "bytes": 2067814
+        },
+        {
+          "name": "shN_labels.webp",
+          "sha256": "e52eced590489c572229d64170f9ae26626e530d0da7da7422e337ca01fe5acc",
+          "bytes": 9040038
+        }
+      ]
+    }
+  ]
+}

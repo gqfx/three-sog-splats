@@ -1,13 +1,18 @@
 import { InstancedBufferAttribute, IntType, Matrix4 } from 'three/webgpu';
 import { abortError, throwIfAborted } from '../../core/errors.js';
 import { createDepthKeys } from './depth.js';
-import { radixSortIndices } from './radix.js';
+import { radixSortKeyValues, RadixSortWorkspace } from './radix.js';
 
 interface SortResult {
   type: 'sorted';
   generation: number;
   durationMs: number;
   order: ArrayBuffer;
+}
+
+interface PendingSort {
+  readonly generation: number;
+  readonly matrix: number[];
 }
 
 export interface WebGLSortMetrics {
@@ -22,10 +27,14 @@ export class WebGLSortBackend {
   readonly cpuAllocatedBytes: number;
   readonly #centers: Float32Array;
   readonly #metrics: WebGLSortMetrics;
+  readonly #workspace: RadixSortWorkspace | null;
   #worker: Worker | null = null;
   #generation = 0;
   #matrixKey = '';
   #recycle: ArrayBuffer | null = null;
+  #pending: PendingSort | null = null;
+  #inFlight = false;
+  #completedGeneration = 0;
   #disposed = false;
 
   constructor(centers: Float32Array, metrics: WebGLSortMetrics) {
@@ -39,10 +48,12 @@ export class WebGLSortBackend {
     );
     this.orderAttribute.gpuType = IntType;
     const usesWorker = typeof Worker !== 'undefined';
+    this.#workspace = usesWorker ? null : new RadixSortWorkspace(count);
     this.gpuAllocatedBytes = this.orderAttribute.array.byteLength;
     this.cpuAllocatedBytes = centers.byteLength
       + this.orderAttribute.array.byteLength
-      + (usesWorker ? centers.byteLength + this.orderAttribute.array.byteLength : 0);
+      + (usesWorker ? centers.byteLength + this.orderAttribute.array.byteLength : 0)
+      + count * 16 + 256 * 4;
     this.allocatedBytes = this.gpuAllocatedBytes + this.cpuAllocatedBytes;
     if (usesWorker) {
       this.#worker = new Worker(new URL('../../workers/sort.worker.js', import.meta.url), {
@@ -63,6 +74,7 @@ export class WebGLSortBackend {
       await new Promise<void>((resolve, reject) => {
         const worker = this.#worker;
         if (!worker) return resolve();
+        if (this.#completedGeneration >= target) return resolve();
         const timeoutState: { value?: ReturnType<typeof globalThis.setTimeout> } = {};
         const cleanup = () => {
           if (timeoutState.value !== undefined) globalThis.clearTimeout(timeoutState.value);
@@ -102,18 +114,16 @@ export class WebGLSortBackend {
     this.#matrixKey = key;
     this.#generation += 1;
     if (this.#worker) {
-      const message = {
-        type: 'sort',
+      this.#pending = {
         generation: this.#generation,
         matrix: matrix.toArray(),
-        ...(this.#recycle ? { recycle: this.#recycle } : {}),
       };
-      const transfer = this.#recycle ? [this.#recycle] : [];
-      this.#recycle = null;
-      this.#worker.postMessage(message, transfer);
+      this.#dispatchPending();
     } else {
       const startedAt = performance.now();
-      const order = radixSortIndices(createDepthKeys(this.#centers, matrix));
+      const workspace = this.#workspace!;
+      const keys = createDepthKeys(this.#centers, matrix, workspace.readKeys);
+      const order = radixSortKeyValues(keys, undefined, 32, 8, workspace).values;
       (this.orderAttribute.array as Uint32Array).set(order);
       this.orderAttribute.needsUpdate = true;
       this.#metrics.onSort(performance.now() - startedAt);
@@ -128,20 +138,45 @@ export class WebGLSortBackend {
     this.#worker?.terminate();
     this.#worker = null;
     this.#recycle = null;
+    this.#pending = null;
+    this.#inFlight = false;
     this.orderAttribute.dispose();
   }
 
   #accept(result: SortResult): void {
     if (result.type !== 'sorted' || this.#disposed) return;
-    if (result.generation < this.#generation) {
+    this.#inFlight = false;
+    if (result.generation <= this.#completedGeneration) {
       this.#recycle = result.order;
+      this.#dispatchPending();
       return;
     }
+    // Camera motion may outpace a worker. Apply every newer completed order;
+    // rejecting it just because another camera is pending starves rendering.
+    this.#completedGeneration = result.generation;
     const order = new Uint32Array(result.order);
     (this.orderAttribute.array as Uint32Array).set(order);
     this.orderAttribute.needsUpdate = true;
     this.#recycle = result.order;
     this.#metrics.onSort(result.durationMs);
     this.#metrics.onUpload();
+    this.#dispatchPending();
+  }
+
+  #dispatchPending(): void {
+    const worker = this.#worker;
+    const pending = this.#pending;
+    if (!worker || !pending || this.#inFlight || this.#disposed) return;
+    this.#pending = null;
+    this.#inFlight = true;
+    const message = {
+      type: 'sort',
+      generation: pending.generation,
+      matrix: pending.matrix,
+      ...(this.#recycle ? { recycle: this.#recycle } : {}),
+    };
+    const transfer = this.#recycle ? [this.#recycle] : [];
+    this.#recycle = null;
+    worker.postMessage(message, transfer);
   }
 }

@@ -1,8 +1,7 @@
 /// <reference lib="webworker" />
 
-import { Matrix4 } from 'three/webgpu';
 import { createDepthKeys } from '../render/sort/depth.js';
-import { radixSortIndices } from '../render/sort/radix.js';
+import { radixSortKeyValues, RadixSortWorkspace } from '../render/sort/radix.js';
 
 type InitializeMessage = {
   type: 'initialize';
@@ -17,16 +16,19 @@ type SortMessage = {
 };
 
 let centers = new Float32Array();
+let workspace = new RadixSortWorkspace(0);
 
 self.onmessage = (event: MessageEvent<InitializeMessage | SortMessage>) => {
   if (event.data.type === 'initialize') {
     centers = new Float32Array(event.data.centers);
+    workspace = new RadixSortWorkspace(centers.length / 3);
     self.postMessage({ type: 'initialized' });
     return;
   }
   const startedAt = performance.now();
-  const matrix = new Matrix4().fromArray(event.data.matrix);
-  const sorted = radixSortIndices(createDepthKeys(centers, matrix));
+  const matrix = { elements: event.data.matrix };
+  const keys = createDepthKeys(centers, matrix, workspace.readKeys);
+  const sorted = radixSortKeyValues(keys, undefined, 32, 8, workspace).values;
   const order = event.data.recycle && event.data.recycle.byteLength === sorted.byteLength
     ? new Uint32Array(event.data.recycle)
     : new Uint32Array(sorted.length);

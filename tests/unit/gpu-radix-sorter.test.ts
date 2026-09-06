@@ -110,4 +110,27 @@ describe('GpuRadixSorter', () => {
     expect(target.computeAsync).not.toHaveBeenCalled();
     sorter.dispose();
   });
+
+  it('sizes the order for the complete translated logical stream', async () => {
+    const sorter = await GpuRadixSorter.create(
+      renderer(),
+      8,
+      {
+        ...textures,
+        sourceCount: 4,
+        translations: [new Vector3(), new Vector3(2, 0, 0)],
+      },
+      mins,
+      maxs,
+      new Box3(new Vector3(-1, -1, -1), new Vector3(3, 1, 1)),
+      {
+        hasSubgroups: () => false,
+        hasCustomDevice: () => false,
+        resolveAdapterInfo: async () => ({ info: null, identityCorrelated: false }),
+      },
+    );
+    expect(sorter.count).toBe(8);
+    expect(sorter.orderAttribute.count).toBe(8);
+    sorter.dispose();
+  });
 });

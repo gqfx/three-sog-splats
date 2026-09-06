@@ -14,14 +14,12 @@ import {
   ivec2,
   max,
   normalize,
-  packHalf2x16,
   packSnorm2x16,
   sqrt,
   storage,
   textureLoad,
   uint,
   uniform,
-  unpackHalf2x16,
   unpackSnorm2x16,
   uvec2,
   uvec4,
@@ -35,7 +33,6 @@ import {
   codebookValue,
   decodeCenter,
   decodeQuaternion,
-  decodeScale,
   rotateByQuaternion,
   shBasis,
   texelForIndex,
@@ -120,7 +117,7 @@ export class SOGWebGPUCache {
     }
     this.#instanceMatrices.needsUpdate = true;
     this.#projectedCenters = new StorageBufferAttribute(new Float32Array(logicalCapacity * 4), 4);
-    this.#projectedEllipses = new StorageBufferAttribute(new Uint32Array(logicalCapacity * 2), 2);
+    this.#projectedEllipses = new StorageBufferAttribute(new Float32Array(logicalCapacity * 4), 4);
     this.#projectedColors = new StorageBufferAttribute(new Uint32Array(logicalCapacity), 1);
     const projectedInputs = {
       centers: this.#projectedCenters,
@@ -135,11 +132,11 @@ export class SOGWebGPUCache {
       visibleIndices: this.#culler.visibleIndices,
     };
     this.#decodeNodes = this.#buildDecodeNodes(textures, meta, coefficientCount);
-    this.#projectionNode = this.#buildProjectionNode(meta, coefficientCount);
+    this.#projectionNode = this.#buildProjectionNode(textures, meta, coefficientCount);
     this.allocatedBytes = sourceCapacity * (4 * 4 + 4 * 4 + 2 * 4)
       + coefficientCapacity * 4 * 4
       + Math.max(1, this.instanceCount) * 16 * 4 * 2
-      + logicalCapacity * (4 * 4 + 2 * 4 + 4)
+      + logicalCapacity * (4 * 4 + 4 * 4 + 4)
       + this.#culler.allocatedBytes;
   }
 
@@ -217,30 +214,21 @@ export class SOGWebGPUCache {
       const pixel = texelForIndex(instanceIndex, textures.width);
       const center = decodeCenter(textures, meta, instanceIndex);
       const quaternion = decodeQuaternion(textures, pixel);
-      const scale = decodeScale(textures, pixel);
       const encodedColor = textureLoad(textures.sh0, pixel);
-      const labels = encodedColor.rgb.mul(255).round();
-      const baseColor = vec4(
-        vec3(
-          codebookValue(textures.codebook, labels.x, 'g'),
-          codebookValue(textures.codebook, labels.y, 'g'),
-          codebookValue(textures.codebook, labels.z, 'g'),
-        ).mul(0.28209479177387814).add(0.5),
-        encodedColor.a,
-      );
+      const encodedScale = textureLoad(textures.scales, pixel);
       centers.element(instanceIndex).assign(vec4(center, 1));
       shapes.element(instanceIndex).assign(uvec4(
         packSnorm2x16(quaternion.xy) as any,
         packSnorm2x16(quaternion.zw) as any,
-        packHalf2x16(scale.xy) as any,
-        packHalf2x16(vec2(scale.z, 0)) as any,
+        packColor(encodedScale),
+        uint(0),
       ));
       const paletteIndex = uint(0).toVar();
       if (meta.shN && textures.shLabels) {
         const label = textureLoad(textures.shLabels, pixel).rg.mul(255).round();
         paletteIndex.assign(uint(label.x).add(uint(label.y).mul(256)));
       }
-      sourceInfo.element(instanceIndex).assign(uvec2(packColor(baseColor), paletteIndex));
+      sourceInfo.element(instanceIndex).assign(uvec2(packColor(encodedColor), paletteIndex));
     })().compute(this.sourceCount, [WORKGROUP_SIZE]);
     decodeAttributes.setName('SOG one-time static attribute dequantization');
     const nodes = [decodeAttributes];
@@ -267,6 +255,7 @@ export class SOGWebGPUCache {
   }
 
   #buildProjectionNode(
+    textures: SOGMaterialTextures,
     meta: SOGMetaV2,
     coefficientCount: number,
   ): ComputeNode {
@@ -284,7 +273,7 @@ export class SOGWebGPUCache {
       Math.max(1, this.instanceCount) * 2,
     ).toReadOnly();
     const projectedCenters = storage(this.#projectedCenters, 'vec4', logicalCapacity);
-    const projectedEllipses = storage(this.#projectedEllipses, 'uvec2', logicalCapacity);
+    const projectedEllipses = storage(this.#projectedEllipses, 'vec4', logicalCapacity);
     const projectedColors = storage(this.#projectedColors, 'uint', logicalCapacity);
     const node = Fn(() => {
       const sourceIndex = instanceIndex.mod(uint(this.sourceCount));
@@ -295,9 +284,12 @@ export class SOGWebGPUCache {
         unpackSnorm2x16(packedShape.x) as any,
         unpackSnorm2x16(packedShape.y) as any,
       ));
-      const scaleXY: any = unpackHalf2x16(packedShape.z);
-      const scaleZ: any = unpackHalf2x16(packedShape.w);
-      const scale = vec3(scaleXY, scaleZ.x);
+      const scaleLabels = unpackColor(packedShape.z).rgb.mul(255).round();
+      const scale = vec3(
+        codebookValue(textures.codebook, scaleLabels.x, 'r').exp(),
+        codebookValue(textures.codebook, scaleLabels.y, 'r').exp(),
+        codebookValue(textures.codebook, scaleLabels.z, 'r').exp(),
+      );
       const axisX = rotateByQuaternion(vec3(scale.x, 0, 0), quaternion);
       const axisY = rotateByQuaternion(vec3(0, scale.y, 0), quaternion);
       const axisZ = rotateByQuaternion(vec3(0, 0, scale.z), quaternion);
@@ -321,7 +313,15 @@ export class SOGWebGPUCache {
       const ellipseX = majorDirection.mul(sqrt(majorValue));
       const ellipseY = minorDirection.mul(sqrt(minorValue));
       const source = sourceInfo.element(sourceIndex);
-      const color = unpackColor(source.x).toVar();
+      // Keep original DC labels until SH evaluation. DC itself may lie outside
+      // [0, 1]; clamping it before adding higher bands changes the final color.
+      const encodedColor = unpackColor(source.x);
+      const colorLabels = encodedColor.rgb.mul(255).round();
+      const color = vec4(vec3(
+        codebookValue(textures.codebook, colorLabels.x, 'g'),
+        codebookValue(textures.codebook, colorLabels.y, 'g'),
+        codebookValue(textures.codebook, colorLabels.z, 'g'),
+      ).mul(0.28209479177387814).add(0.5), encodedColor.a).toVar();
       if (coefficients && meta.shN) {
         const localCamera = instanceMatrices.element(uint(this.instanceCount).add(copyIndex))
           .mul(vec4(this.#localCameraPosition, 1)).xyz;
@@ -334,10 +334,7 @@ export class SOGWebGPUCache {
         }
       }
       projectedCenters.element(instanceIndex).assign(centerClip);
-      projectedEllipses.element(instanceIndex).assign(uvec2(
-        packHalf2x16(ellipseX) as any,
-        packHalf2x16(ellipseY) as any,
-      ));
+      projectedEllipses.element(instanceIndex).assign(vec4(ellipseX, ellipseY));
       projectedColors.element(instanceIndex).assign(packColor(vec4(clamp(color.rgb, 0, 1), color.a)));
     })().compute(this.logicalCount, [WORKGROUP_SIZE]);
     node.setName('SOG camera-change projection and SH refresh');

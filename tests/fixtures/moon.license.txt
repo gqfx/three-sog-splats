@@ -1,0 +1,23 @@
+Moon 3D Gaussian Splat — Artemis II Data
+
+Author: Nicolas Diolez
+Scene: https://superspl.at/scene/2ac8f423
+Viewer: https://superspl.at/s?id=2ac8f423
+Author profile: https://superspl.at/user/nicolasdiolez
+License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+License URL: https://creativecommons.org/licenses/by/4.0/
+
+The scene description credits the source photographs to NASA Johnson Space
+Center and the Artemis II crew.
+
+This repository bundles the scene's original native SOG v2 files into the
+single generated/moon.sog ZIP container expected by SOGLoader. No images were
+transcoded and no Gaussians, spherical-harmonic bands, or palette entries were
+removed. The payload contains 4,929,011 unique Gaussians and its complete SH3
+payload.
+
+Bundled SHA-256:
+70b427c1673058954b6ad80e48a65bd78d631834206f199a2acdce07968c11c8
+
+The ZIP container is canonicalized with a fixed 2020-01-01 timestamp and no
+local user/OS metadata. Native payload files are byte-for-byte unchanged.

@@ -55,10 +55,7 @@ export class NativeSOGStorage {
     this.meta = deepFreeze(options.meta);
     this.bounds = deepFreeze(options.bounds);
     this.diagnostics = options.diagnostics;
-    this.#ownedImages = new Map([...options.images].map(([attribute, image]) => [
-      attribute,
-      Object.freeze({ ...image }),
-    ]));
+    this.#ownedImages = new Map(options.images);
     this.images = new ReadonlyMapView(this.#ownedImages);
     this.shBands = options.shBands;
   }
@@ -87,7 +84,17 @@ export class NativeSOGStorage {
     if (this.#disposed) return;
     this.#disposed = true;
     this.#version += 1;
-    for (const image of this.#ownedImages.values()) image.close();
+    const errors: unknown[] = [];
+    for (const image of this.#ownedImages.values()) {
+      try {
+        image.close();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length > 0) {
+      throw new AggregateError(errors, 'Failed to close one or more SOG native images.');
+    }
   }
 }
 

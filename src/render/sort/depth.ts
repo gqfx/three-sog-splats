@@ -1,4 +1,4 @@
-import type { Matrix4 } from 'three/webgpu';
+export interface DepthMatrix { readonly elements: ArrayLike<number>; }
 
 const bitsBuffer = new ArrayBuffer(4);
 const bitsFloat = new Float32Array(bitsBuffer);
@@ -21,9 +21,10 @@ export function floatToDepthBucket(value: number): number {
   return orderedUintToDepthBucket(floatToOrderedUint(value));
 }
 
-export function createDepthKeys(centers: Float32Array, viewMatrix: Matrix4): Uint32Array {
+export function createDepthKeys(centers: Float32Array, viewMatrix: DepthMatrix, target?: Uint32Array): Uint32Array {
   const count = Math.floor(centers.length / 3);
-  const result = new Uint32Array(count);
+  const result = target ?? new Uint32Array(count);
+  if (result.length !== count) throw new RangeError('Depth key output must match the center count.');
   const elements = viewMatrix.elements;
   for (let index = 0; index < count; index += 1) {
     const offset = index * 3;
@@ -36,7 +37,7 @@ export function createDepthKeys(centers: Float32Array, viewMatrix: Matrix4): Uin
   return result;
 }
 
-export function createDepthBuckets(centers: Float32Array, viewMatrix: Matrix4): Uint32Array {
+export function createDepthBuckets(centers: Float32Array, viewMatrix: DepthMatrix): Uint32Array {
   return createDepthKeys(centers, viewMatrix).map(orderedUintToDepthBucket);
 }
 

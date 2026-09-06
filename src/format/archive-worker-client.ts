@@ -1,5 +1,6 @@
 import { abortError, SOGError, throwIfAborted } from '../core/errors.js';
 import type { ZipEntry } from './zip.js';
+import type { ZipArchiveLimits } from './zip.js';
 import { parseZipArchive } from './zip.js';
 
 interface WorkerEntry {
@@ -20,9 +21,10 @@ export async function parseZipArchiveAsync(
   data: ArrayBuffer,
   useWorker: boolean,
   signal: AbortSignal,
+  limits: ZipArchiveLimits = {},
 ): Promise<ReadonlyMap<string, ZipEntry>> {
   throwIfAborted(signal);
-  if (!useWorker || typeof Worker === 'undefined') return parseZipArchive(data);
+  if (!useWorker || typeof Worker === 'undefined') return parseZipArchive(data, limits);
 
   const worker = new Worker(new URL('../workers/archive.worker.js', import.meta.url), {
     name: 'three-sog-archive',
@@ -40,7 +42,7 @@ export async function parseZipArchiveAsync(
         signal.removeEventListener('abort', abort);
         reject(new SOGError('INVALID_ARCHIVE', `SOG archive worker failed: ${event.message}`, { stage: 'archive' }));
       };
-      worker.postMessage(data, [data]);
+      worker.postMessage({ data, limits }, [data]);
     });
     if (response.error) {
       throw new SOGError(response.code ?? 'INVALID_ARCHIVE', response.error, { stage: 'archive' });

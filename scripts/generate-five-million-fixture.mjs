@@ -88,7 +88,6 @@ const meta = {
   version: 2,
   asset: { generator: 'three-sog-splats 5M synthetic lattice' },
   count,
-  model: 'antialiased',
   means: {
     mins: [-logExtent, -logExtent, -logExtent],
     maxs: [logExtent, logExtent, logExtent],

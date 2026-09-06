@@ -2,19 +2,19 @@
 
 import { SOGError } from '../core/errors.js';
 import { parseZipArchive } from '../format/zip.js';
+import type { ZipArchiveLimits } from '../format/zip.js';
 
-self.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+self.onmessage = (event: MessageEvent<{ data: ArrayBuffer; limits: ZipArchiveLimits }>) => {
   try {
-    const entries = [...parseZipArchive(event.data).values()].map((entry) => {
-      const bytes = entry.bytes.slice();
-      return {
+    const entries = [...parseZipArchive(event.data.data, event.data.limits).values()].map((entry) => (
+      {
         filename: entry.filename,
         compressionMethod: entry.compressionMethod,
         compressedSize: entry.compressedSize,
         uncompressedSize: entry.uncompressedSize,
-        buffer: bytes.buffer,
-      };
-    });
+        buffer: entry.bytes.buffer,
+      }
+    ));
     self.postMessage({ entries }, { transfer: entries.map((entry) => entry.buffer) });
   } catch (error) {
     self.postMessage({

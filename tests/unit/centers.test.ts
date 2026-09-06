@@ -31,3 +31,29 @@ describe('WebGL center readback', () => {
     ]);
   });
 });
+
+it('restores the current render target before awaiting center readback', async () => {
+  const { getCachedCenters } = await import('../../src/render/centers.js');
+  const { Texture, RenderTarget } = await import('three/webgpu');
+  const { validMeta } = await import('../helpers/fixture-builder.js');
+  let target: any = null;
+  let finishCompile!: () => void;
+  let finishReadback!: (pixels: Float32Array) => void;
+  const renderer: any = {
+    getRenderTarget: () => target, setRenderTarget: (value: unknown) => { target = value; },
+    initRenderTarget() {}, render() {},
+    compileAsync: () => new Promise<void>((resolve) => { finishCompile = resolve; }),
+    readRenderTargetPixelsAsync: () => new Promise<Float32Array>((resolve) => { finishReadback = resolve; }),
+  };
+  const low = new Texture(); const high = new Texture();
+  const pending = getCachedCenters({}, renderer, { meansLow: low, meansHigh: high, width: 2, height: 2 }, validMeta);
+  const applicationTarget = new RenderTarget(2, 2);
+  target = applicationTarget;
+  finishCompile(); await Promise.resolve();
+  expect(target).toBe(applicationTarget);
+  // The app can render or change targets while GPU readback is pending.
+  target = null;
+  finishReadback(new Float32Array(16)); await pending;
+  expect(target).toBeNull();
+  low.dispose(); high.dispose(); applicationTarget.dispose();
+});

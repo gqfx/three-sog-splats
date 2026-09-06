@@ -9,6 +9,7 @@ export type RadixSelectionReason =
   | 'adapter-identity-ambiguous'
   | 'unsupported-vendor'
   | 'subgroup-size-unavailable'
+  | 'subgroup-size-incompatible'
   | 'subgroup-size-too-large';
 
 export interface RadixAdapterInfo {
@@ -50,16 +51,6 @@ interface RendererBackendParameters {
   };
 }
 
-interface NavigatorGpu {
-  readonly gpu?: {
-    requestAdapter(options?: {
-      powerPreference?: 'low-power' | 'high-performance';
-      featureLevel?: 'compatibility' | 'core';
-      xrCompatible?: boolean;
-    }): Promise<{ readonly info?: RadixAdapterInfo } | null>;
-  };
-}
-
 export function evaluateRadixAdmission(signals: RadixAdmissionSignals): RadixBackendSelection {
   const portable = (reason: Exclude<RadixSelectionReason, 'validated-nvidia-subgroups'>): RadixBackendSelection => ({
     kind: 'portable',
@@ -74,10 +65,21 @@ export function evaluateRadixAdmission(signals: RadixAdmissionSignals): RadixBac
     return portable('unsupported-vendor');
   }
   const subgroupMinSize = signals.adapterInfo.subgroupMinSize;
-  if (!Number.isFinite(subgroupMinSize) || subgroupMinSize === undefined || subgroupMinSize <= 0) {
+  const subgroupMaxSize = signals.adapterInfo.subgroupMaxSize;
+  if (
+    !Number.isFinite(subgroupMinSize)
+    || subgroupMinSize === undefined
+    || subgroupMinSize <= 0
+    || !Number.isFinite(subgroupMaxSize)
+    || subgroupMaxSize === undefined
+    || subgroupMaxSize <= 0
+  ) {
     return portable('subgroup-size-unavailable');
   }
-  if (subgroupMinSize > 32) return portable('subgroup-size-too-large');
+  if (subgroupMinSize > 32 || subgroupMaxSize > 32) return portable('subgroup-size-too-large');
+  if (subgroupMinSize !== 32 || subgroupMaxSize !== 32) {
+    return portable('subgroup-size-incompatible');
+  }
   return {
     kind: 'onesweep',
     reason: 'validated-nvidia-subgroups',
@@ -89,24 +91,11 @@ async function resolveDefaultAdapterInfo(renderer: WebGPURenderer): Promise<{
   readonly info: RadixAdapterInfo | null;
   readonly identityCorrelated: boolean;
 }> {
-  const backend = renderer.backend as RendererBackendParameters;
-  if (backend.parameters?.device !== undefined) {
-    return { info: null, identityCorrelated: false };
-  }
-  const gpu = (globalThis.navigator as unknown as NavigatorGpu | undefined)?.gpu;
-  if (!gpu) return { info: null, identityCorrelated: false };
-  const adapter = await gpu.requestAdapter({
-    featureLevel: 'compatibility',
-    ...(backend.parameters?.powerPreference
-      ? { powerPreference: backend.parameters.powerPreference }
-      : {}),
-    xrCompatible: renderer.xr.enabled,
-  });
-  return {
-    info: adapter?.info ?? null,
-    // Three.js uses the same standard request options when it owns the device.
-    identityCorrelated: adapter !== null,
-  };
+  void renderer;
+  // WebGPU does not guarantee that a second requestAdapter() call returns the
+  // adapter backing Three.js' renderer. Until Three.js exposes correlated
+  // adapter information, production selection remains on the portable path.
+  return { info: null, identityCorrelated: false };
 }
 
 export async function selectRadixBackend(

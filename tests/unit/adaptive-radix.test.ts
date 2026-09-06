@@ -86,7 +86,7 @@ describe('conservative radix backend admission', () => {
   const admitted = {
     hasSubgroups: true,
     customDevice: false,
-    adapterInfo: { vendor: 'nvidia', subgroupMinSize: 32 },
+    adapterInfo: { vendor: 'nvidia', subgroupMinSize: 32, subgroupMaxSize: 32 },
     identityCorrelated: true,
   } as const;
 
@@ -102,9 +102,11 @@ describe('conservative radix backend admission', () => {
     [{ ...admitted, customDevice: true }, 'custom-device'],
     [{ ...admitted, adapterInfo: null }, 'adapter-unavailable'],
     [{ ...admitted, identityCorrelated: false }, 'adapter-identity-ambiguous'],
-    [{ ...admitted, adapterInfo: { vendor: 'apple', subgroupMinSize: 32 } }, 'unsupported-vendor'],
+    [{ ...admitted, adapterInfo: { vendor: 'apple', subgroupMinSize: 32, subgroupMaxSize: 32 } }, 'unsupported-vendor'],
     [{ ...admitted, adapterInfo: { vendor: 'nvidia' } }, 'subgroup-size-unavailable'],
-    [{ ...admitted, adapterInfo: { vendor: 'nvidia', subgroupMinSize: 64 } }, 'subgroup-size-too-large'],
+    [{ ...admitted, adapterInfo: { vendor: 'nvidia', subgroupMinSize: 32 } }, 'subgroup-size-unavailable'],
+    [{ ...admitted, adapterInfo: { vendor: 'nvidia', subgroupMinSize: 16, subgroupMaxSize: 32 } }, 'subgroup-size-incompatible'],
+    [{ ...admitted, adapterInfo: { vendor: 'nvidia', subgroupMinSize: 32, subgroupMaxSize: 64 } }, 'subgroup-size-too-large'],
   ] as const)('falls back to Portable for unsafe signal sets', (signals, reason) => {
     expect(evaluateRadixAdmission(signals)).toMatchObject({ kind: 'portable', reason });
   });
@@ -115,7 +117,7 @@ describe('conservative radix backend admission', () => {
       hasSubgroups: () => true,
       hasCustomDevice: () => false,
       resolveAdapterInfo: async () => ({
-        info: { vendor: 'nvidia', subgroupMinSize: 32 },
+        info: { vendor: 'nvidia', subgroupMinSize: 32, subgroupMaxSize: 32 },
         identityCorrelated: true,
       }),
     })).resolves.toMatchObject({ kind: 'onesweep' });
@@ -123,7 +125,7 @@ describe('conservative radix backend admission', () => {
       hasSubgroups: () => true,
       hasCustomDevice: () => true,
       resolveAdapterInfo: async () => ({
-        info: { vendor: 'nvidia', subgroupMinSize: 32 },
+        info: { vendor: 'nvidia', subgroupMinSize: 32, subgroupMaxSize: 32 },
         identityCorrelated: true,
       }),
     })).resolves.toMatchObject({ kind: 'portable', reason: 'custom-device' });

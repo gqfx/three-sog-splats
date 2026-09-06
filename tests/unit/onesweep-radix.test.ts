@@ -75,6 +75,7 @@ describe('OneSweepRadixSortBackend', () => {
     sorter.sort(renderer);
     expect(renderer.compute).not.toHaveBeenCalled();
     expect(() => new OneSweepRadixSortBackend(0, input, 12, 32)).toThrow(RangeError);
+    expect(() => new OneSweepRadixSortBackend(0, input, 16, 16)).toThrow(RangeError);
     expect(() => new OneSweepRadixSortBackend(0, input, 16, 64)).toThrow(RangeError);
     expect(() => new OneSweepRadixSortBackend(2, input, 16, 32)).toThrow(RangeError);
     sorter.dispose();

@@ -66,11 +66,12 @@ decodes and asynchronously reads back `center.xyz` once per native resource,
 sorts in a transferable worker, and uploads only the instanced order. All other
 attributes remain GPU-native. The WebGPU path builds a complete order with a
 stable adaptive GPU radix sort, with no center, key, intermediate-buffer, or
-order readback. A portable 4-bit backend is the universal path. An 8-bit
-OneSweep backend is selected only for a correlated NVIDIA adapter with
-advertised subgroup support and a compatible reported subgroup size; custom,
-unknown, Apple, mobile, or otherwise ambiguous devices stay on Portable.
-Equal-key splats retain source order.
+order readback. A portable 4-bit backend is the universal production path. The
+8-bit OneSweep implementation is admitted only when adapter identity is
+correlated and NVIDIA reports a fixed 32-lane subgroup. WebGPU does not
+currently expose that correlation through Three.js, so default production
+selection stays on Portable instead of inferring identity from a second
+`requestAdapter()` call. Equal-key splats retain source order.
 
 Cached WebGPU meshes also classify projected splats before rasterization using
 an opacity-weighted screen-area metric derived from PlayCanvas. Behind-camera,
@@ -109,7 +110,8 @@ Load diagnostics include per-stage timings, downloaded bytes, archive entries,
 decoded images, splat count, retained temporary bytes, and failed-stage identity.
 Render diagnostics include backend, upload/compile/prepare/first-frame/sort
 timings, sort/upload/readback counters, active count, estimated GPU allocation,
-state, selected radix backend, rounded radix bits, and selection reason.
+retained CPU backing-array allocation, state, selected radix backend, rounded
+radix bits, and selection reason.
 Contribution telemetry reports submitted/visible counts plus camera-or-alpha,
 off-screen, and low-contribution rejection counts. Reading it is explicit and
 increments the readback diagnostics; the normal stationary path performs no
@@ -128,6 +130,8 @@ LOD streaming, multi-resource aggregation, range requests, conversion/export,
 other splat formats, classic `WebGLRenderer`, or order-independent transparency.
 Zip64, encrypted archives, multi-disk archives, and unknown compression methods
 are rejected explicitly.
+SOG metadata requesting antialiased Gaussian or 2DGS equations is also rejected
+until those distinct render paths are implemented.
 
 See [performance and limits](./docs/performance-limits.md) for measurements and
 methodology, [acceptance results](./docs/acceptance.md) for the release gate, and
@@ -146,15 +150,16 @@ control reloads with either WebGPU or forced WebGL.
 **Start motion test** and **Stop motion test** provide repeatable full-resolution
 performance sampling without changing the active count. The overlay and
 structured state report frame percentiles, sort rate/count, viewport, DPR, and
-backend-specific sort timing. See [example notes](./examples/README.md).
+backend-specific sort timing. See [example notes](https://github.com/gqfx/three-sog-splats/blob/main/examples/README.md).
 The source selector also includes a reproducible synthetic 5,000,000-splat
 WebGPU stress scene. It uses about 200 MB of reported GPU resources on the
 Portable path and automatically switches away from forced WebGL.
 For a real-data comparison, Lion grid downloads the same 3.3 MB Lion SOG once
 and batches 25 translated runtime copies into one draw (4,877,475 logical
-splats). One-time static dequantization and camera-change projection/SH caches
-replace per-frame texture decode; stationary frames run no compute. No expanded
-25-copy source fixture is stored or uploaded.
+splats). Its depth sort covers the complete logical stream, so copies can
+interleave correctly. One-time static dequantization and camera-change
+projection/SH caches replace per-frame texture decode; stationary frames run no
+compute. No expanded 25-copy source fixture is stored or uploaded.
 The WebGPU Example exposes contribution-culling enable/threshold controls and
 an explicit telemetry button. Its controlled profiler includes a same-view
 culling on/off A/B and corrects Three.js's CPU-side triangle estimate with the
@@ -163,7 +168,8 @@ GPU survivor count.
 ## Development
 
 ```bash
-npm install
+npm ci --ignore-scripts
+npm run fixtures:fetch
 npm test
 npm run build:example
 npm run test:browser
@@ -178,7 +184,41 @@ both backends and no-SH/SH variants. The browser suite also
 loads a full-resolution 116,374-Gaussian SOG directly converted from Three.js's
 CC BY 4.0 Millipede example through both backends. The public-example tests load
 and snapshot both Millipede no-SH and the complete 195,099-Gaussian Lion SH2
-asset on both backends.
-See the [Millipede attribution](./tests/fixtures/millipede.license.txt),
-[Lion attribution](./tests/fixtures/lion.license.txt), and the
+asset on both backends. The WebGPU source selector also includes Three.js's
+full-resolution 445,409-Gaussian Tomatoes SPZ v4 example with all three SH
+bands and Nicolas Diolez's full-resolution Moon SOG v2 scene with 4,929,011
+unique Gaussians and all three SH bands. Both are single unique meshes without
+runtime copies.
+See the [Millipede attribution](https://github.com/gqfx/three-sog-splats/blob/main/tests/fixtures/millipede.license.txt),
+[Lion attribution](https://github.com/gqfx/three-sog-splats/blob/main/tests/fixtures/lion.license.txt),
+[Tomatoes attribution](https://github.com/gqfx/three-sog-splats/blob/main/tests/fixtures/tomatoes.license.txt),
+[Moon attribution](https://github.com/gqfx/three-sog-splats/blob/main/tests/fixtures/moon.license.txt), and the
 [compatibility audit](./docs/three-compatibility.md).
+
+## Resource budgets and release status
+
+The 0.1.x API is experimental. The measured/browser-tested platform is Chrome
+on macOS with the documented Three.js releases; mobile, Firefox/Safari, WebXR
+and global sorting across overlapping independent meshes are not certified.
+The 5M splat limit is not a frame-rate guarantee. Streaming and LOD remain future
+features; large models must download fully before display.
+
+Default loading limits are 128 MiB downloaded, 128 MiB per ZIP entry, 256 MiB
+actual total ZIP output, 8192 pixels per image dimension, 8,388,608 pixels per
+image, 256 MiB total decoded RGBA and two concurrent image decodes. Configure
+`maxDownloadBytes`, `maxArchiveEntryBytes`, `maxArchiveBytes`,
+`maxImageDimension`, `maxImagePixels`, `maxDecodedBytes` and `decodeConcurrency`
+on loadAsync. Native PNG/WebP headers are checked before allocation; custom
+image decoders own their pre-allocation safety and may implement getDimensions.
+
+prepare accepts `maxGpuBytes` (default 512 MiB tracked SOG allocations) and
+`maxProjectedCacheBytes` (default 256 MiB; zero disables caching). Cache admission
+uses estimated bytes including SH and logical instances. A translated batch
+requires enough cache budget. Device texture/storage limits are checked before
+upload; browser images, framebuffers and driver overhead still need headroom.
+
+For a fresh checkout, run `npm run fixtures:fetch` before using Moon. Its native
+files and canonical archive are verified against committed hashes. The large
+archive is not tracked in Git. See
+[contribution and release instructions](https://github.com/gqfx/three-sog-splats/blob/main/CONTRIBUTING.md)
+and [security reporting](./SECURITY.md).

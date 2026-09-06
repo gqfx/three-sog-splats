@@ -104,7 +104,7 @@ try {
     mvpLimit: {
       splats: 5_000_000,
       estimatedNativeGpuBytes: 5_000_000 * 52,
-      nextPowerOfTwoSortCapacity: 2_097_152,
+      sortCapacity: 5_000_000,
     },
   };
   console.log(JSON.stringify(report, null, 2));

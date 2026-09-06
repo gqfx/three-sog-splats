@@ -3,11 +3,28 @@ export interface RadixSortResult {
   readonly values: Uint32Array;
 }
 
+/** Reusable buffers; returned results remain valid until the next sort. */
+export class RadixSortWorkspace {
+  readonly readKeys: Uint32Array;
+  readonly writeKeys: Uint32Array;
+  readonly readIndices: Uint32Array;
+  readonly writeIndices: Uint32Array;
+  readonly histogram = new Uint32Array(256);
+  constructor(count: number) {
+    this.readKeys = new Uint32Array(count);
+    this.writeKeys = new Uint32Array(count);
+    this.readIndices = new Uint32Array(count);
+    this.writeIndices = new Uint32Array(count);
+  }
+  get byteLength(): number { return this.readKeys.byteLength * 4 + this.histogram.byteLength; }
+}
+
 export function radixSortKeyValues(
   keys: Uint32Array,
   initialIndices?: Uint32Array,
   bits = 32,
   radixBits: 4 | 8 = 8,
+  workspace?: RadixSortWorkspace,
 ): RadixSortResult {
   if (bits < 0 || bits > 32 || bits % radixBits !== 0) {
     throw new RangeError(`Radix bit count must be a multiple of ${radixBits} in the range 0..32.`);
@@ -16,13 +33,15 @@ export function radixSortKeyValues(
   if (initialIndices && initialIndices.length !== count) {
     throw new RangeError('Initial radix indices must match the key count.');
   }
-  let readKeys = keys.slice();
-  let writeKeys = new Uint32Array(count);
-  let readIndices = initialIndices?.slice() ?? Uint32Array.from({ length: count }, (_, index) => index);
-  let writeIndices = new Uint32Array(count);
+  const buffers = workspace ?? new RadixSortWorkspace(count);
+  if (buffers.readKeys.length !== count) throw new RangeError('Radix workspace must match the key count.');
+  let { readKeys, writeKeys, readIndices, writeIndices } = buffers;
+  if (readKeys !== keys) readKeys.set(keys);
+  if (initialIndices) readIndices.set(initialIndices);
+  else for (let index = 0; index < count; index += 1) readIndices[index] = index;
   const bucketCount = 2 ** radixBits;
   const bucketMask = bucketCount - 1;
-  const histogram = new Uint32Array(bucketCount);
+  const histogram = buffers.histogram.subarray(0, bucketCount);
 
   for (let shift = 0; shift < bits; shift += radixBits) {
     histogram.fill(0);

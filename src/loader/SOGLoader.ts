@@ -6,10 +6,17 @@ import type {
   SOGImageDecoder,
   SOGLoadOptions,
   SOGNativeImage,
+  SOGMetaV2,
+  SOGImageDimensions,
 } from '../core/types.js';
 import { SOG_MVP_MAX_SPLATS } from '../core/types.js';
 import { BrowserSOGImageDecoder } from '../format/image.js';
+import { imageBudget, addImageBytes } from '../format/image-budget.js';
 import { parseZipArchiveAsync } from '../format/archive-worker-client.js';
+import {
+  DEFAULT_MAX_ARCHIVE_BYTES,
+  DEFAULT_MAX_ARCHIVE_ENTRY_BYTES,
+} from '../format/zip.js';
 import {
   calculateBounds,
   getAttributeFiles,
@@ -22,7 +29,7 @@ import type { SOGResource } from '../resource/SOGResource.js';
 
 interface SharedLoad {
   readonly controller: AbortController;
-  readonly progressListeners: Set<NonNullable<SOGLoadOptions['onProgress']>>;
+  readonly progressListeners: Map<NonNullable<SOGLoadOptions['onProgress']>, number>;
   promise: Promise<NativeSOGStorage>;
   storage: NativeSOGStorage | null;
   subscribers: number;
@@ -30,6 +37,29 @@ interface SharedLoad {
 }
 
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
+const DEFAULT_MAX_DOWNLOAD_BYTES = 128 * 1024 * 1024;
+
+function resolveLimit(value: number | undefined, fallback: number, name: string): number {
+  const resolved = value ?? fallback;
+  if (!Number.isSafeInteger(resolved) || resolved <= 0) {
+    throw new RangeError(`${name} must be a positive safe integer.`);
+  }
+  return resolved;
+}
+
+function notifyProgress(
+  listener: NonNullable<SOGLoadOptions['onProgress']>,
+  loaded: number,
+  total: number | undefined,
+): void {
+  try {
+    listener(loaded, total);
+  } catch (error) {
+    const reportError = (globalThis as typeof globalThis & { reportError?: (reason: unknown) => void }).reportError;
+    if (reportError) reportError(error);
+    else console.error('SOG progress listener failed.', error);
+  }
+}
 
 function resolveUrl(url: string): string {
   try {
@@ -78,6 +108,11 @@ async function download(
   signal: AbortSignal,
   diagnostics: LoadDiagnosticsBuilder,
 ): Promise<ArrayBuffer> {
+  const maxDownloadBytes = resolveLimit(
+    options.maxDownloadBytes,
+    DEFAULT_MAX_DOWNLOAD_BYTES,
+    'maxDownloadBytes',
+  );
   const fetchImplementation = options.fetch ?? globalThis.fetch;
   if (typeof fetchImplementation !== 'function') {
     throw new SOGError('DOWNLOAD_FAILED', 'No fetch implementation is available.', { stage: 'download' });
@@ -93,10 +128,25 @@ async function download(
   const totalHeader = response.headers.get('content-length');
   const parsedTotal = totalHeader === null ? Number.NaN : Number(totalHeader);
   const total = Number.isFinite(parsedTotal) && parsedTotal >= 0 ? parsedTotal : undefined;
+  if (total !== undefined && total > maxDownloadBytes) {
+    await response.body?.cancel('SOG download size limit exceeded.');
+    throw new SOGError(
+      'DOWNLOAD_FAILED',
+      `SOG response declares ${total} bytes, exceeding the ${maxDownloadBytes}-byte download limit.`,
+      { stage: 'download' },
+    );
+  }
   if (!response.body) {
     const buffer = await response.arrayBuffer();
+    if (buffer.byteLength > maxDownloadBytes) {
+      throw new SOGError(
+        'DOWNLOAD_FAILED',
+        `SOG response exceeds the ${maxDownloadBytes}-byte download limit.`,
+        { stage: 'download' },
+      );
+    }
     diagnostics.downloadedBytes = buffer.byteLength;
-    options.onProgress?.(buffer.byteLength, total);
+    if (options.onProgress) notifyProgress(options.onProgress, buffer.byteLength, total);
     return buffer;
   }
 
@@ -110,7 +160,15 @@ async function download(
       if (result.done) break;
       chunks.push(result.value);
       received += result.value.byteLength;
-      options.onProgress?.(received, total);
+      if (received > maxDownloadBytes) {
+        await reader.cancel('SOG download size limit exceeded.');
+        throw new SOGError(
+          'DOWNLOAD_FAILED',
+          `SOG response exceeds the ${maxDownloadBytes}-byte download limit.`,
+          { stage: 'download' },
+        );
+      }
+      if (options.onProgress) notifyProgress(options.onProgress, received, total);
     }
   } finally {
     reader.releaseLock();
@@ -127,24 +185,60 @@ async function download(
 
 async function decodeImages(
   decoder: SOGImageDecoder,
+  meta: SOGMetaV2,
   files: ReadonlyMap<SOGAttributeName, string>,
   entries: ReadonlyMap<string, ZipEntry>,
   signal: AbortSignal,
+  options: SOGLoadOptions,
 ): Promise<ReadonlyMap<SOGAttributeName, SOGNativeImage>> {
-  const decoded = await Promise.allSettled(
-    [...files].map(async ([attribute, filename]) => {
-      const entry = entries.get(filename);
-      if (!entry) throw new SOGError('MISSING_ATTRIBUTE', `SOG attribute "${attribute}" references missing bundle file "${filename}".`, { stage: 'decode' });
-      const image = await decoder.decode(entry.bytes, filename, signal);
-      return [attribute, { ...image, attribute, filename }] as const;
-    }),
-  );
-  const failure = decoded.find((result): result is PromiseRejectedResult => result.status === 'rejected');
-  if (failure) {
-    for (const result of decoded) if (result.status === 'fulfilled') result.value[1].close();
-    throw failure.reason;
+  const budget = imageBudget(options);
+  const jobs = [...files];
+  const headers = new Map<SOGAttributeName, SOGImageDimensions>();
+  if (decoder.getDimensions) {
+    let bytes = 0;
+    for (const [attribute, filename] of jobs) {
+      const dimensions = decoder.getDimensions(entries.get(filename)!.bytes, filename);
+      bytes = addImageBytes(dimensions, bytes, budget, filename);
+      headers.set(attribute, dimensions);
+    }
+    validateImageDimensions(meta, headers);
   }
-  return new Map(decoded.map((result) => (result as PromiseFulfilledResult<readonly [SOGAttributeName, SOGNativeImage]>).value));
+  let nextJob = 0;
+  let decodedBytes = 0;
+  const images = new Map<SOGAttributeName, SOGNativeImage>();
+  const errors: unknown[] = [];
+  await Promise.all(Array.from({ length: Math.min(budget.concurrency, jobs.length) }, async () => {
+    while (nextJob < jobs.length && errors.length === 0) {
+      const [attribute, filename] = jobs[nextJob++]!;
+      let image: SOGNativeImage | undefined;
+      try {
+        throwIfAborted(signal);
+        image = await decoder.decode(entries.get(filename)!.bytes, filename, signal);
+        throwIfAborted(signal);
+        decodedBytes = addImageBytes(image, decodedBytes, budget, filename);
+        const header = headers.get(attribute);
+        if (header && (header.width !== image.width || header.height !== image.height)) {
+          throw new SOGError('IMAGE_DIMENSION_MISMATCH', `Decoded dimensions for "${filename}" differ from its header.`, { stage: 'decode' });
+        }
+        const owned = image;
+        images.set(attribute, Object.freeze({
+          attribute, filename, width: owned.width, height: owned.height,
+          source: owned.source, close: () => owned.close(),
+        }));
+        image = undefined;
+      } catch (error) {
+        errors.push(error);
+        try { image?.close(); } catch (cleanupError) { errors.push(cleanupError); }
+      }
+    }
+  }));
+  if (errors.length > 0) {
+    for (const image of images.values()) {
+      try { image.close(); } catch (error) { errors.push(error); }
+    }
+    throw errors[0];
+  }
+  return images;
 }
 
 export class SOGLoader {
@@ -154,6 +248,7 @@ export class SOGLoader {
 
   async loadAsync(url: string, options: SOGLoadOptions = {}): Promise<SOGResource> {
     validateSource(url);
+    imageBudget(options);
     throwIfAborted(options.signal);
     const resolvedUrl = resolveUrl(url);
     const key = this.#operationKey(resolvedUrl, options);
@@ -162,7 +257,7 @@ export class SOGLoader {
       const controller = new AbortController();
       shared = {
         controller,
-        progressListeners: new Set(),
+        progressListeners: new Map(),
         subscribers: 0,
         settled: false,
         storage: null,
@@ -172,7 +267,9 @@ export class SOGLoader {
       const sharedOptions: SOGLoadOptions = {
         ...options,
         onProgress: (loaded, total) => {
-          for (const listener of created.progressListeners) listener(loaded, total);
+          for (const listener of created.progressListeners.keys()) {
+            notifyProgress(listener, loaded, total);
+          }
         },
       };
       created.promise = this.#load(resolvedUrl, sharedOptions, controller.signal).then((storage) => {
@@ -188,7 +285,12 @@ export class SOGLoader {
     }
 
     shared.subscribers += 1;
-    if (options.onProgress) shared.progressListeners.add(options.onProgress);
+    if (options.onProgress) {
+      shared.progressListeners.set(
+        options.onProgress,
+        (shared.progressListeners.get(options.onProgress) ?? 0) + 1,
+      );
+    }
     let detached = false;
     const detach = () => {
       if (detached) return;
@@ -206,7 +308,11 @@ export class SOGLoader {
       return storage.acquire();
     } finally {
       options.signal?.removeEventListener('abort', detach);
-      if (options.onProgress) shared.progressListeners.delete(options.onProgress);
+      if (options.onProgress) {
+        const remaining = (shared.progressListeners.get(options.onProgress) ?? 1) - 1;
+        if (remaining <= 0) shared.progressListeners.delete(options.onProgress);
+        else shared.progressListeners.set(options.onProgress, remaining);
+      }
       detach();
     }
   }
@@ -231,6 +337,10 @@ export class SOGLoader {
       options.credentials ?? 'same-origin',
       headers,
       options.useArchiveWorker !== false,
+      options.maxDownloadBytes ?? DEFAULT_MAX_DOWNLOAD_BYTES,
+      options.maxArchiveEntryBytes ?? DEFAULT_MAX_ARCHIVE_ENTRY_BYTES,
+      options.maxArchiveBytes ?? DEFAULT_MAX_ARCHIVE_BYTES,
+      JSON.stringify(imageBudget(options)),
       this.#objectId(options.fetch),
       this.#objectId(options.imageDecoder),
     ].join('|');
@@ -246,6 +356,18 @@ export class SOGLoader {
         archive,
         options.useArchiveWorker !== false,
         signal,
+        {
+          maxEntryBytes: resolveLimit(
+            options.maxArchiveEntryBytes,
+            DEFAULT_MAX_ARCHIVE_ENTRY_BYTES,
+            'maxArchiveEntryBytes',
+          ),
+          maxTotalBytes: resolveLimit(
+            options.maxArchiveBytes,
+            DEFAULT_MAX_ARCHIVE_BYTES,
+            'maxArchiveBytes',
+          ),
+        },
       ));
       diagnostics.archiveEntries = entries.size;
       throwIfAborted(signal);
@@ -266,8 +388,15 @@ export class SOGLoader {
         throw new SOGError('INVALID_METADATA', `SOG count ${meta.count} exceeds the documented MVP limit of ${SOG_MVP_MAX_SPLATS}.`, { stage: 'validation' });
       }
 
-      const decoder = options.imageDecoder ?? new BrowserSOGImageDecoder();
-      const images = await diagnostics.measure('decode', () => decodeImages(decoder, getAttributeFiles(meta), entries, signal));
+      const ownedDecoder = options.imageDecoder ? undefined : new BrowserSOGImageDecoder(true);
+      const decoder = options.imageDecoder ?? ownedDecoder!;
+      const images = await diagnostics.measure('decode', async () => {
+        try {
+          return await decodeImages(decoder, meta, getAttributeFiles(meta), entries, signal, options);
+        } finally {
+          ownedDecoder?.dispose();
+        }
+      });
       for (const image of images.values()) cleanup.defer(() => image.close());
       diagnostics.decodedImages = images.size;
       throwIfAborted(signal);
